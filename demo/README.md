@@ -115,10 +115,16 @@ Simulado, y los subtítulos lo dicen:
   subtítulos dice qué configuración tenía cada grabación. La clase de demostración se copia a
   `ios/TransMiVozUITests/` solo en el runner, antes de compilar, y no cambia la
   suite de pruebas del proyecto. Cada recorrido se graba con
-  `xcrun simctl io … recordVideo`.
+  `xcrun simctl io … recordVideo`. El texto se escribe letra por letra, como
+  una persona; la clave, que solo se ve como puntos, de una vez.
 - **Composición** (`demo/componer.py`): recorta cada grabación al recorrido, la
   pone en el lienzo de 1920 × 1080 con el panel de subtítulos (ASS con libass)
-  y escribe una hoja de miniaturas por video y `indice.md`.
+  y escribe una hoja de miniaturas por video y `indice.md`. En el iPhone, la
+  hora de cada cuadro sale de las tablas del archivo y no de ffmpeg: simctl
+  graba con cuadros B que se reordenan a través de los ratos quietos, y con las
+  marcas de ffmpeg el video salía cortado, adelantado a los subtítulos y sin la
+  mayoría de los cuadros con movimiento. El índice marca «Revisar» si un video
+  no dura lo que el recorrido o si ffmpeg decodifica otro número de cuadros.
 
 Para volver a grabar solo una plataforma, el mensaje del commit puede llevar
 `[solo web]` o `[solo iphone]` (en cualquier parte del mensaje, así que no se
@@ -127,8 +133,10 @@ anterior en curso.
 El artefacto final trae las dos plataformas: para la que no se grabó, usa la
 grabación cruda más reciente de la rama (se guarda 3 días). Con `[sin web]` en
 el mensaje del commit no se graba la web ni se completa con una grabación
-anterior, y el artefacto trae solo el iPhone. La fecha y la hora de cada
-grabación salen en el título de cada video.
+anterior, y el artefacto trae solo el iPhone. Con `[solo componer]` no se
+graba nada: se vuelven a componer las grabaciones crudas más recientes de la
+rama, en unos 6 minutos. La fecha y la hora de cada grabación salen en el
+título de cada video.
 
 Para grabar en local hacen falta Chrome o Xcode, ffmpeg y la app compilada.
 Los comandos son los mismos del workflow.

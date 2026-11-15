@@ -123,8 +123,20 @@ final class DemoVideosUITests: XCTestCase {
         if esperarSeleccion { esperar(pestana, "isSelected == %@", true, "No se seleccionó la pestaña \(nombre)") }
     }
 
+    /// Escribe una letra por llamada, como una persona: un solo `typeText` mete toda la frase en menos de un segundo y en
+    /// el video aparece de golpe. Se escribe en el elemento con el foco (`app`), que no busca el campo en cada letra, y
+    /// se espera un poco más después de cada espacio.
+    private func teclear(_ texto: String) {
+        for letra in texto {
+            app.typeText(String(letra))
+            pausa(letra == " " ? 0.18 : 0.06)
+        }
+    }
+
     /// Toca el campo (fuera de su barra interna, como las pruebas de interfaz), escribe y espera a ver el texto completo.
-    private func escribir(_ texto: String, en campo: XCUIElement, descripcion: String? = nil, comprobar: Bool = true) {
+    /// La clave se escribe de una vez (`humano: false`): en pantalla solo se ven puntos.
+    private func escribir(_ texto: String, en campo: XCUIElement, descripcion: String? = nil, comprobar: Bool = true,
+                          humano: Bool = true) {
         XCTAssertTrue(campo.waitForExistence(timeout: 15), "No apareció el campo")
         esperar(campo, "isHittable == %@", true, "El campo no es tocable")
         accion(descripcion ?? "Escribe: «\(texto)»")
@@ -149,7 +161,7 @@ final class DemoVideosUITests: XCTestCase {
                 pausa(0.3)
             }
         }
-        campo.typeText(texto)
+        if humano { teclear(texto) } else { campo.typeText(texto) }
         if comprobar { esperar(campo, "value == %@", texto, "El campo no muestra «\(texto)»") }
         pausa(0.6)
     }
@@ -242,7 +254,8 @@ final class DemoVideosUITests: XCTestCase {
         escribir(origenServidor, en: elemento("campo-origen"), descripcion: "Escribe la dirección del servidor")
         cerrarTeclado()
         mostrar("campo-clave")
-        escribir(claveServidor, en: elemento("campo-clave"), descripcion: "Escribe la clave de acceso", comprobar: false)
+        escribir(claveServidor, en: elemento("campo-clave"), descripcion: "Escribe la clave de acceso", comprobar: false,
+                 humano: false)
         app.typeText("\n")
         if !app.keyboards.firstMatch.waitForNonExistence(timeout: 4) { cerrarTeclado() }
         let recordar = elemento("interruptor-recordar")
