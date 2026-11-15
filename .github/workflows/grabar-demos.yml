@@ -12,6 +12,8 @@
 # plataforma que no se grabó, la más reciente de esta rama que no haya vencido:
 # el artefacto final trae los videos de las dos. Con «[sin web]» no se graba la
 # web ni se completa con una grabación anterior: el artefacto trae solo el iPhone.
+# Con «[solo componer]» no se graba nada: se vuelven a componer las grabaciones
+# crudas más recientes de la rama (sirve para probar cambios de demo/componer.py).
 name: Grabar videos de demostración
 
 on:
@@ -29,7 +31,7 @@ env:
 jobs:
   web:
     name: Grabar la app web (Chrome sin ventana)
-    if: ${{ !contains(github.event.head_commit.message, '[solo iphone]') && !contains(github.event.head_commit.message, '[sin web]') }}
+    if: ${{ !contains(github.event.head_commit.message, '[solo iphone]') && !contains(github.event.head_commit.message, '[sin web]') && !contains(github.event.head_commit.message, '[solo componer]') }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     concurrency:
@@ -92,7 +94,7 @@ jobs:
 
   iphone:
     name: Grabar la app del iPhone (Simulator)
-    if: ${{ !contains(github.event.head_commit.message, '[solo web]') }}
+    if: ${{ !contains(github.event.head_commit.message, '[solo web]') && !contains(github.event.head_commit.message, '[solo componer]') }}
     runs-on: macos-26
     timeout-minutes: 120
     concurrency:

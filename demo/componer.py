@@ -236,21 +236,40 @@ def componer(json_path: Path, salida: Path) -> dict:
     ass = salida / f"{datos['id']}.ass"
     ass.write_text(subtitulos(datos, total), encoding="utf-8")
     mp4 = salida / f"{datos['id']}.mp4"
+    if datos.get("plataforma") == "iphone":
+        # simctl graba H.264 con cuadros variables y con cuadros B que se reordenan a través de los ratos sin cambios: un
+        # cuadro puede mostrarse hasta 95 s después de decodificarse. Con `-ss` y `-t` antes de `-i`, ffmpeg buscaba y
+        # cortaba con esas marcas desplazadas, y el video salía cortado, con cuadros perdidos (la escritura aparecía de
+        # golpe) y desfasado de los subtítulos. Se decodifica desde el principio, sin la lista de ediciones (simctl
+        # escribe una sola, trivial), se pasa a 30 cuadros/s repitiendo el último cuadro en los ratos quietos y se recorta
+        # después, sobre los cuadros ya ordenados.
+        entrada = ["-ignore_editlist", "1", "-i", str(video)]
+        previo = (
+            "setpts=PTS-STARTPTS,fps=30,tpad=stop_mode=clone:stop_duration=30,"
+            f"trim=start={inicio:.3f}:duration={total:.3f},setpts=PTS-STARTPTS,"
+        )
+    else:
+        entrada = ["-ss", f"{inicio:.2f}", "-t", f"{total:.2f}", "-i", str(video)]
+        previo = ""
     filtro = (
-        f"scale={pantalla_ancho}:{PANTALLA_ALTO}:flags=lanczos,"
+        f"{previo}scale={pantalla_ancho}:{PANTALLA_ALTO}:flags=lanczos,"
         f"pad={LIENZO_ANCHO}:{LIENZO_ALTO}:{PANTALLA_X}:{PANTALLA_Y}:color=0x141414,"
         f"drawbox=x={PANTALLA_X - 5}:y={PANTALLA_Y - 5}:w={pantalla_ancho + 10}:h={PANTALLA_ALTO + 10}:color=0x3c3c3c:t=5,"
         f"subtitles=filename={ass.as_posix()}"
     )
     subprocess.run(
         [
-            "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
-            "-ss", f"{inicio:.2f}", "-t", f"{total:.2f}", "-i", str(video),
+            "ffmpeg", "-hide_banner", "-loglevel", "error", "-y", *entrada,
             "-vf", filtro, "-r", "30", "-c:v", "libx264", "-preset", "medium", "-crf", "20",
             "-pix_fmt", "yuv420p", "-movflags", "+faststart", "-an", str(mp4),
         ],
         check=True,
     )
+    # Un video más corto que el recorrido se ve cortado: se avisa en el índice y el paso termina con error.
+    obtenido = float(sondear(mp4, "format=duration", False))
+    aviso = f"dura {obtenido:.1f} s de {total:.1f} s" if abs(obtenido - total) > 1.0 else ""
+    if aviso:
+        print(f"  {datos['id']}: el video {aviso}")
     # Hoja de miniaturas: 8 cuadros repartidos en el video, para revisarlo sin abrirlo.
     cuadros = 8
     subprocess.run(
@@ -268,8 +287,9 @@ def componer(json_path: Path, salida: Path) -> dict:
         "id": datos["id"],
         "plataforma": datos.get("plataforma"),
         "titulo": datos.get("titulo", ""),
-        "segundos": round(total, 1),
+        "segundos": round(obtenido, 1),
         "error": error,
+        "aviso": aviso,
     }
 
 
@@ -297,6 +317,9 @@ def main() -> int:
         indice.write("| Archivo | Plataforma | Qué muestra | Duración | Nota |\n| --- | --- | --- | --- | --- |\n")
         for r in resultados:
             nota = "Recorrido incompleto: ver el registro de la grabación" if r["error"] else ""
+            if r.get("aviso"):
+                nota = f"Video cortado: {r['aviso']}"
+                fallos.append(f"{r['id']}: el video {r['aviso']}")
             plataforma = "Web" if r["plataforma"] == "web" else "iPhone"
             indice.write(f"| `{r['id']}.mp4` | {plataforma} | {r['titulo']} | {r['segundos']} s | {nota} |\n")
     (salida / "indice.json").write_text(json.dumps(resultados, ensure_ascii=False, indent=2), encoding="utf-8")
