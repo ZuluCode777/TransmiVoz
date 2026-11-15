@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import json
 import re
+import struct
 import subprocess
 import sys
 from pathlib import Path
@@ -115,6 +116,136 @@ def sondear(video: Path, entradas: str, flujo: bool) -> str:
         orden += ["-select_streams", "v:0"]
     orden += ["-show_entries", entradas, "-of", "csv=p=0", str(video)]
     return subprocess.run(orden, capture_output=True, text=True, check=True).stdout.strip()
+
+
+def _cajas(datos: bytes, inicio: int, fin: int):
+    """Cajas ISO BMFF (MP4/MOV) entre `inicio` y `fin`: (tipo, comienzo del contenido, final)."""
+    i = inicio
+    while i + 8 <= fin:
+        tamano, tipo = struct.unpack(">I4s", datos[i:i + 8])
+        cabecera = 8
+        if tamano == 1:
+            tamano = struct.unpack(">Q", datos[i + 8:i + 16])[0]
+            cabecera = 16
+        elif tamano == 0:
+            tamano = fin - i
+        if tamano < cabecera:
+            return
+        yield tipo, i + cabecera, i + tamano
+        i += tamano
+
+
+def horas_de_cuadros(video: Path) -> list[float]:
+    """Hora de presentación de cada cuadro de la pista de video, en segundos desde el comienzo de la grabación y en orden
+    de presentación. Sale de las tablas del archivo (`stts`: hora de decodificación; `ctts`: desfase, con signo, hasta la
+    presentación), sin pasar por la interpretación de ffmpeg."""
+    datos = video.read_bytes()
+    contenedores = {b"moov", b"trak", b"mdia", b"minf", b"stbl"}
+    for tipo, a, b in _cajas(datos, 0, len(datos)):
+        if tipo != b"moov":
+            continue
+        for tipo_pista, pa, pb in _cajas(datos, a, b):
+            if tipo_pista != b"trak":
+                continue
+            pista: dict = {}
+
+            def recorrer(x: int, y: int) -> None:
+                for t, xa, xb in _cajas(datos, x, y):
+                    if t in contenedores:
+                        recorrer(xa, xb)
+                    elif t == b"hdlr" and datos[xa + 8:xa + 12] == b"vide":
+                        pista["video"] = True
+                    elif t == b"mdhd":
+                        version = datos[xa]
+                        pista["escala"] = struct.unpack(">I", datos[xa + 12:xa + 16] if version == 0 else datos[xa + 20:xa + 24])[0]
+                    elif t == b"stts":
+                        n = struct.unpack(">I", datos[xa + 4:xa + 8])[0]
+                        pista["stts"] = [struct.unpack(">II", datos[xa + 8 + 8 * k:xa + 16 + 8 * k]) for k in range(n)]
+                    elif t == b"ctts":
+                        n = struct.unpack(">I", datos[xa + 4:xa + 8])[0]
+                        pista["ctts"] = [struct.unpack(">Ii", datos[xa + 8 + 8 * k:xa + 16 + 8 * k]) for k in range(n)]
+
+            recorrer(pa, pb)
+            if not pista.get("video") or "stts" not in pista or not pista.get("escala"):
+                continue
+            decodificacion, t = [], 0
+            for cuenta, delta in pista["stts"]:
+                for _ in range(cuenta):
+                    decodificacion.append(t)
+                    t += delta
+            desfases: list[int] = []
+            for cuenta, desfase in pista.get("ctts", []):
+                desfases += [desfase] * cuenta
+            desfases += [0] * (len(decodificacion) - len(desfases))
+            return sorted((d + o) / pista["escala"] for d, o in zip(decodificacion, desfases))
+    raise ValueError(f"{video} no tiene una pista de video legible")
+
+
+def _leer(flujo, n: int) -> bytes | None:
+    partes, falta = [], n
+    while falta:
+        trozo = flujo.read(falta)
+        if not trozo:
+            return None
+        partes.append(trozo)
+        falta -= len(trozo)
+    return b"".join(partes)
+
+
+def componer_iphone(video: Path, mp4: Path, inicio: float, total: float, ancho: int, alto: int, filtro: str) -> str:
+    """Video del iPhone a 30 cuadros/s con la hora real de cada cuadro.
+
+    simctl graba H.264 con cuadros variables y con cuadros B que se reordenan a través de los ratos sin cambios: un cuadro
+    llega a mostrarse 95 s después de decodificarse. ffmpeg desplaza las marcas de tiempo de ese archivo y, recortado
+    con ellas, el video salía cortado, con la imagen adelantada a los subtítulos y sin la mayoría de los cuadros con
+    movimiento (la escritura aparecía de golpe). Aquí ffmpeg solo decodifica los cuadros en orden de presentación; la
+    hora de cada uno sale de las tablas del archivo y este script arma cada cuadro de salida con el último cuadro
+    mostrado a esa hora. Devuelve un aviso si el número de cuadros decodificados no coincide con las tablas."""
+    horas = horas_de_cuadros(video)
+    tamano = ancho * alto * 3 // 2
+    decodificador = subprocess.Popen(
+        [
+            # Sin la lista de ediciones: con ella, ffmpeg descarta los cuadros que su marca desplazada deja antes del
+            # comienzo (simctl escribe una sola edición, que abarca toda la grabación).
+            "ffmpeg", "-hide_banner", "-loglevel", "error", "-ignore_editlist", "1", "-i", str(video), "-an",
+            # Marcas únicas y crecientes: con «passthrough» ffmpeg no descarta ni repite ningún cuadro.
+            "-vf", f"setpts=N/(30*TB),scale={ancho}:{alto}:flags=lanczos,format=yuv420p",
+            "-fps_mode", "passthrough", "-f", "rawvideo", "-pix_fmt", "yuv420p", "pipe:1",
+        ],
+        stdout=subprocess.PIPE,
+    )
+    codificador = subprocess.Popen(
+        [
+            "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+            "-f", "rawvideo", "-pix_fmt", "yuv420p", "-s", f"{ancho}x{alto}", "-r", "30", "-i", "pipe:0",
+            "-vf", filtro, "-c:v", "libx264", "-preset", "medium", "-crf", "20",
+            "-pix_fmt", "yuv420p", "-movflags", "+faststart", "-an", str(mp4),
+        ],
+        stdin=subprocess.PIPE,
+    )
+    leidos, actual, siguiente = 0, None, _leer(decodificador.stdout, tamano)
+    for k in range(int(round(total * 30))):
+        hora = inicio + k / 30
+        # Avanza mientras el cuadro siguiente ya se muestra a esta hora; el primero siempre se toma.
+        while siguiente is not None and (actual is None or (leidos < len(horas) and horas[leidos] <= hora)):
+            actual, leidos = siguiente, leidos + 1
+            siguiente = _leer(decodificador.stdout, tamano)
+        if actual is None:
+            codificador.kill()
+            decodificador.kill()
+            raise RuntimeError(f"ffmpeg no decodificó ningún cuadro de {video.name}")
+        codificador.stdin.write(actual)
+    codificador.stdin.close()
+    # El resto solo se cuenta, para comprobar que ffmpeg decodificó tantos cuadros como dicen las tablas.
+    decodificados = leidos + (1 if siguiente is not None else 0)
+    while _leer(decodificador.stdout, tamano) is not None:
+        decodificados += 1
+    decodificador.wait()
+    if codificador.wait() != 0:
+        raise RuntimeError(f"ffmpeg no pudo codificar {mp4.name}")
+    if decodificados != len(horas):
+        return f"se decodificaron {decodificados} cuadros de {len(horas)}"
+    return ""
 
 
 def subtitulos(datos: dict, total: float) -> str:
@@ -236,42 +367,31 @@ def componer(json_path: Path, salida: Path) -> dict:
     ass = salida / f"{datos['id']}.ass"
     ass.write_text(subtitulos(datos, total), encoding="utf-8")
     mp4 = salida / f"{datos['id']}.mp4"
-    if datos.get("plataforma") == "iphone":
-        # simctl graba H.264 con cuadros variables y con cuadros B que se reordenan a través de los ratos sin cambios: un
-        # cuadro puede mostrarse hasta 95 s después de decodificarse. Con `-ss` y `-t` antes de `-i`, ffmpeg buscaba y
-        # cortaba con esas marcas desplazadas, y el video salía cortado, con cuadros perdidos (la escritura aparecía de
-        # golpe) y desfasado de los subtítulos. Se decodifica desde el principio, sin la lista de ediciones (simctl
-        # escribe una sola, trivial), se pasa a 30 cuadros/s repitiendo el último cuadro en los ratos quietos y se recorta
-        # después, sobre los cuadros ya ordenados. `-copyts` conserva la hora de cada cuadro tal como está en el archivo:
-        # sin él, ffmpeg toma como inicio la marca de decodificación desplazada (hasta 95 s antes del primer cuadro) y la
-        # imagen se adelanta a los subtítulos.
-        entrada = ["-ignore_editlist", "1", "-copyts", "-i", str(video)]
-        previo = (
-            "fps=30,tpad=stop_mode=clone:stop_duration=30,"
-            f"trim=start={inicio:.3f}:duration={total:.3f},setpts=PTS-STARTPTS,"
-        )
-    else:
-        entrada = ["-ss", f"{inicio:.2f}", "-t", f"{total:.2f}", "-i", str(video)]
-        previo = ""
-    filtro = (
-        f"{previo}scale={pantalla_ancho}:{PANTALLA_ALTO}:flags=lanczos,"
+    lienzo = (
         f"pad={LIENZO_ANCHO}:{LIENZO_ALTO}:{PANTALLA_X}:{PANTALLA_Y}:color=0x141414,"
         f"drawbox=x={PANTALLA_X - 5}:y={PANTALLA_Y - 5}:w={pantalla_ancho + 10}:h={PANTALLA_ALTO + 10}:color=0x3c3c3c:t=5,"
         f"subtitles=filename={ass.as_posix()}"
     )
-    subprocess.run(
-        [
-            "ffmpeg", "-hide_banner", "-loglevel", "error", "-y", *entrada,
-            "-vf", filtro, "-r", "30", "-c:v", "libx264", "-preset", "medium", "-crf", "20",
-            "-pix_fmt", "yuv420p", "-movflags", "+faststart", "-an", str(mp4),
-        ],
-        check=True,
-    )
+    aviso = ""
+    if datos.get("plataforma") == "iphone":
+        aviso = componer_iphone(video, mp4, inicio, total, pantalla_ancho, PANTALLA_ALTO, lienzo)
+    else:
+        subprocess.run(
+            [
+                "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+                "-ss", f"{inicio:.2f}", "-t", f"{total:.2f}", "-i", str(video),
+                "-vf", f"scale={pantalla_ancho}:{PANTALLA_ALTO}:flags=lanczos,{lienzo}", "-r", "30",
+                "-c:v", "libx264", "-preset", "medium", "-crf", "20",
+                "-pix_fmt", "yuv420p", "-movflags", "+faststart", "-an", str(mp4),
+            ],
+            check=True,
+        )
     # Un video más corto que el recorrido se ve cortado: se avisa en el índice y el paso termina con error.
     obtenido = float(sondear(mp4, "format=duration", False))
-    aviso = f"dura {obtenido:.1f} s de {total:.1f} s" if abs(obtenido - total) > 1.0 else ""
+    if abs(obtenido - total) > 1.0:
+        aviso = "; ".join(x for x in (aviso, f"dura {obtenido:.1f} s de {total:.1f} s") if x)
     if aviso:
-        print(f"  {datos['id']}: el video {aviso}")
+        print(f"  {datos['id']}: {aviso}")
     # Hoja de miniaturas: 8 cuadros repartidos en el video, para revisarlo sin abrirlo.
     cuadros = 8
     subprocess.run(
@@ -320,8 +440,8 @@ def main() -> int:
         for r in resultados:
             nota = "Recorrido incompleto: ver el registro de la grabación" if r["error"] else ""
             if r.get("aviso"):
-                nota = f"Video cortado: {r['aviso']}"
-                fallos.append(f"{r['id']}: el video {r['aviso']}")
+                nota = f"Revisar: {r['aviso']}"
+                fallos.append(f"{r['id']}: {r['aviso']}")
             plataforma = "Web" if r["plataforma"] == "web" else "iPhone"
             indice.write(f"| `{r['id']}.mp4` | {plataforma} | {r['titulo']} | {r['segundos']} s | {nota} |\n")
     (salida / "indice.json").write_text(json.dumps(resultados, ensure_ascii=False, indent=2), encoding="utf-8")
