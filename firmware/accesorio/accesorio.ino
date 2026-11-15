@@ -119,6 +119,7 @@ static_assert(puerta::kAttInesperado == BLE_ATT_ERR_UNLIKELY, "código ATT disti
 static_assert(puerta::kAccionClaveEnPantalla == BLE_SM_IOACT_DISP, "acción de emparejamiento distinta de la de NimBLE");
 static_assert(puerta::kObjetoClaveNuestra == BLE_STORE_OBJ_TYPE_OUR_SEC, "tipo de almacén distinto del de NimBLE");
 static_assert(puerta::kObjetoClaveDelPar == BLE_STORE_OBJ_TYPE_PEER_SEC, "tipo de almacén distinto del de NimBLE");
+static_assert(puerta::kSinConexion == BLE_HS_CONN_HANDLE_NONE, "manejador vacío distinto del de NimBLE");
 
 constexpr uint32_t kBaudios = sen0395::kBaudios;
 constexpr uint32_t kPeriodoCicloMs = 2;
@@ -234,6 +235,7 @@ void evento_notificar(ble_npl_event*) {
   }
   bool conectada;
   bool cortar_sesion;
+  bool avisar_corte = false;
   uint16_t conexion = 0;
   uint16_t id_sesion;
   {
@@ -241,9 +243,11 @@ void evento_notificar(ble_npl_event*) {
     conectada = g_puerta.sesion().conectada();
     id_sesion = g_puerta.sesion().id_conexion();
     cortar_sesion = g_puerta.gracia_vencida(millis(), &conexion);
+    // Se corta en cada ciclo hasta que llega la desconexión; el aviso, una vez por conexión.
+    if (cortar_sesion) avisar_corte = g_puerta.sesion().registrar_corte_por_gracia();
   }
   if (cortar_sesion) {
-    Serial.println("BLE: enlace sin proteger pasado el plazo; se corta");
+    if (avisar_corte) Serial.println("BLE: enlace sin proteger pasado el plazo; se corta");
     cortar(conexion);
   }
   if (conectada) {
@@ -306,7 +310,7 @@ void atender_radar() {
   if (!kRadarHabilitado) return;
   radar::atender_uart(g_radar, g_uart, g_uart_estado);
   if (g_supervisor.vigilar(g_radar, g_uart)) {
-    Serial.println("Radar: sin latido o configuración fallida; se reaplica la configuración (sin escribir su flash)");
+    Serial.println("Radar: sin latido o configuración fallida; se repite el arranque del radar (sin reescribir su flash si ya guardó la configuración y su ventana coincide)");
   }
 }
 
@@ -315,10 +319,17 @@ void iniciar_radar() {
   Serial1.begin(kBaudios, SERIAL_8N1, VISIONARIA_PIN_RADAR_RX, VISIONARIA_PIN_RADAR_TX);
   // Un desborde del controlador de la UART avisa a la lectura: lo perdido no se une con lo siguiente.
   Serial1.onReceiveError([](hardwareSerial_error_t) { g_perdida_uart.store(true); });
+  // Línea vacía antes de la primera orden: en el banco del 12/11 (R4) el radar
+  // perdió el primer byte de la primera orden una vez («ensorStop is not
+  // recognized»). Si el primer byte se pierde, que sea el de esta línea, que no
+  // significa nada; el radar contesta con su prompt y 100 ms bastan para que lo
+  // haga antes de que se vacíe el búfer.
+  Serial1.write("\r\n");
+  delay(100);
   // Nada que haya quedado en el búfer antes de arrancar vale como observación.
   while (Serial1.available() > 0) Serial1.read();
   g_perdida_uart.store(false);
-  g_radar.reiniciar(true);  // el arranque guarda la configuración (una vez); las recuperaciones, no
+  g_radar.reiniciar(true);  // el arranque guarda la configuración (una vez); las recuperaciones, no si ya se guardó
 #endif
 }
 
@@ -423,21 +434,41 @@ int escribir_vinculo(int tipo, const union ble_store_value* valor) {
 
 // --- Eventos GAP (hilo del stack) ------------------------------------------------------------
 
+// Todo enlace VIVO tiene sesión, y con ella el corte de gracia. En este núcleo
+// (ESP-IDF 5.5.5, CONFIG_BT_NIMBLE_ENABLE_CONN_REATTEMPT=y) el stack entrega
+// BLE_GAP_EVENT_CONNECT cuando termina la lectura de funciones remotas del par
+// (ble_gap_rx_rd_rem_sup_feat_complete), no al crearse el enlace, y con el status
+// CRUDO de esa lectura, no el del enlace: 26 (0x1A, función remota no soportada;
+// el portátil) en un enlace vivo, 22 o 19 (0x16 y 0x13, el enlace terminó antes)
+// en uno que ya no existe. Por eso ni el status ni el orden dicen si hay enlace:
+// lo dice ble_gap_conn_find(). Un fallo de conexión de verdad llega sin manejador
+// y no crea sesión. CONNECT puede llegar DESPUÉS de ENC_CHANGE, de la petición de
+// clave o de la suscripción: esos eventos también registran el enlace
+// (PuertaBle::al_conectar no reinicia lo ya registrado). Sin el cerrojo.
+void registrar_enlace(uint16_t conexion) {
+  ble_gap_conn_desc d;
+  const bool viva = ble_gap_conn_find(conexion, &d) == 0;
+  puerta::Registro r;
+  {
+    Cerrojo c;
+    r = g_puerta.registrar_enlace(conexion, viva, millis());
+  }
+  if (r == puerta::Registro::Nuevo) {
+    Serial.println("BLE: conexión nueva; sesión limpia, sin suscripción ni datos previos");
+  } else if (r == puerta::Registro::Rechazado) {
+    Serial.println("BLE: segundo cliente rechazado; un solo cliente a la vez");
+    cortar(conexion);
+  }
+}
+
 int evento_gap(ble_gap_event* ev, void*) {
   switch (ev->type) {
     case BLE_GAP_EVENT_CONNECT: {
-      if (ev->connect.status != 0) return 0;  // falló: loop() vuelve a anunciar
-      bool aceptada;
-      {
-        Cerrojo c;
-        aceptada = g_puerta.al_conectar(ev->connect.conn_handle, millis());
+      if (ev->connect.status != 0) {
+        Serial.printf("BLE: CONNECT con status %d (lectura de funciones remotas del par); se comprueba el enlace\n",
+                      ev->connect.status);
       }
-      if (aceptada) {
-        Serial.println("BLE: conexión nueva; sesión limpia, sin suscripción ni datos previos");
-      } else {
-        Serial.println("BLE: segundo cliente rechazado; un solo cliente a la vez");
-        cortar(ev->connect.conn_handle);
-      }
+      registrar_enlace(ev->connect.conn_handle);
       return 0;
     }
 
@@ -449,6 +480,7 @@ int evento_gap(ble_gap_event* ev, void*) {
 
     case BLE_GAP_EVENT_ENC_CHANGE: {
       const uint16_t conexion = ev->enc_change.conn_handle;
+      registrar_enlace(conexion);
       enlace::EstadoSeguridad s;
       const bool hay = estado_en_vivo(conexion, &s);
       puerta::AccionGap accion;
@@ -469,6 +501,7 @@ int evento_gap(ble_gap_event* ev, void*) {
       if (ev->subscribe.attr_handle != g_val_medicion) return 0;
       enlace::EstadoSeguridad s;
       const uint16_t conexion = ev->subscribe.conn_handle;
+      registrar_enlace(conexion);
       const bool hay = estado_en_vivo(conexion, &s);
       Cerrojo c;
       // Suscribir sin cifrado, autenticación y vínculo no sirve: se ignora y la
@@ -482,13 +515,18 @@ int evento_gap(ble_gap_event* ev, void*) {
 
     case BLE_GAP_EVENT_PASSKEY_ACTION: {
       const uint16_t conexion = ev->passkey.conn_handle;
+      registrar_enlace(conexion);
       uint32_t clave = 0;
       puerta::AccionClave accion;
       {
         Cerrojo c;
         accion = g_puerta.al_pedir_clave(ev->passkey.params.action, conexion, millis(), &clave);
       }
+      // Estos mensajes no llevan la clave ni nada derivado de ella (la guardia de
+      // probar_enlace.sh lo comprueba): sirven para medir en el banco el tiempo
+      // entre «conexión nueva», la petición y el corte (ea-12-ble.md, paso 10c).
       if (accion == puerta::AccionClave::Inyectar) {
+        Serial.println("BLE: se pide la clave en el teléfono; plazo ampliado");
         ble_sm_io io;
         memset(&io, 0, sizeof(io));
         io.action = BLE_SM_IOACT_DISP;
@@ -496,9 +534,12 @@ int evento_gap(ble_gap_event* ev, void*) {
         const int rc = ble_sm_inject_io(conexion, &io);
         clave = 0;
         io.passkey = 0;
-        if (rc != 0) cortar(conexion);
+        if (rc != 0) {
+          Serial.printf("BLE: el stack no aceptó la clave (rc=%d); se corta\n", rc);
+          cortar(conexion);
+        }
       } else {
-        Serial.println("BLE: emparejamiento rechazado (sin ventana de alta o acción no admitida)");
+        Serial.println("BLE: se pide la clave y se rechaza (ventana de alta cerrada, otra conexión o acción no admitida); se corta");
         cortar(conexion);
       }
       return 0;
@@ -542,16 +583,22 @@ void anunciar() {
   respuesta.name = reinterpret_cast<const uint8_t*>(kNombre);
   respuesta.name_len = static_cast<uint8_t>(strlen(kNombre));
   respuesta.name_is_complete = 1;
-  uint8_t propia;
-  if (ble_gap_adv_set_fields(&campos) != 0 || ble_gap_adv_rsp_set_fields(&respuesta) != 0 ||
-      ble_hs_id_infer_auto(0, &propia) != 0) {
-    return;
-  }
+  if (ble_gap_adv_set_fields(&campos) != 0 || ble_gap_adv_rsp_set_fields(&respuesta) != 0) return;
   ble_gap_adv_params parametros;
   memset(&parametros, 0, sizeof(parametros));
   parametros.conn_mode = BLE_GAP_CONN_MODE_UND;
   parametros.disc_mode = BLE_GAP_DISC_MODE_GEN;
-  ble_gap_adv_start(propia, nullptr, BLE_HS_FOREVER, &parametros, evento_gap, nullptr);
+  // Siempre la dirección PÚBLICA (la MAC de fábrica del chip): es la que el iPhone
+  // guarda con el vínculo y la única estable. BLEDevice::init() deja además una
+  // dirección aleatoria nueva en cada arranque (ble_hs_util_ensure_addr), y
+  // ble_hs_id_infer_auto() la prefiere: con ella el vínculo de iOS no sobrevive a
+  // un reinicio de la placa. Sin dirección pública no hay anuncio, y se dice.
+  const int rc = ble_gap_adv_start(BLE_OWN_ADDR_PUBLIC, nullptr, BLE_HS_FOREVER, &parametros, evento_gap, nullptr);
+  static int ultimo_rc = 0;
+  if (rc != ultimo_rc) {
+    ultimo_rc = rc;
+    if (rc != 0) Serial.printf("BLE: no se pudo anunciar con la dirección pública (rc=%d)\n", rc);
+  }
 }
 
 // --- Arranque del BLE --------------------------------------------------------------
@@ -662,12 +709,13 @@ void imprimir_estado(uint32_t ahora) {
                 static_cast<unsigned long>(g_vinculos_rechazados.load()));
   if (kRadarHabilitado) {
     const sen0395::Contadores& k = g_radar.contadores();
-    Serial.printf("uart validas=%lu parciales=%lu largas=%lu otras=%lu ignoradas=%lu errores=%lu timeouts=%lu descartados=%lu perdidas=%lu reintentos=%lu\n",
+    Serial.printf("uart validas=%lu parciales=%lu largas=%lu otras=%lu ignoradas=%lu errores=%lu timeouts=%lu descartados=%lu perdidas=%lu reintentos=%lu rango_distinto=%lu\n",
                   static_cast<unsigned long>(k.tramas_validas), static_cast<unsigned long>(k.invalidas_parciales),
                   static_cast<unsigned long>(k.invalidas_largas), static_cast<unsigned long>(k.invalidas_otras),
                   static_cast<unsigned long>(k.lineas_ignoradas), static_cast<unsigned long>(k.errores_radar),
                   static_cast<unsigned long>(k.timeouts_orden), static_cast<unsigned long>(g_uart_estado.bytes_descartados),
-                  static_cast<unsigned long>(g_uart_estado.perdidas), static_cast<unsigned long>(g_supervisor.reintentos()));
+                  static_cast<unsigned long>(g_uart_estado.perdidas), static_cast<unsigned long>(g_supervisor.reintentos()),
+                  static_cast<unsigned long>(k.rangos_distintos));
   }
 }
 

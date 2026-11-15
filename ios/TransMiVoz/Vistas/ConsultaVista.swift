@@ -1,7 +1,7 @@
 import SwiftUI
 
-/// Zona de foco de VoiceOver: al terminar una consulta, el foco pasa al resultado.
-enum ZonaFocoConsulta: Hashable { case resultado }
+/// Zona de foco de VoiceOver: al terminar una consulta, el foco pasa al resultado; si el dictado no puede seguir, al mensaje.
+enum ZonaFocoConsulta: Hashable { case resultado, dictado }
 
 /// Pantalla de consulta textual al backend. La app no interpreta nada de
 /// transporte: muestra lo que el servidor responde y los errores con su recuperación.
@@ -12,8 +12,11 @@ struct ConsultaVista: View {
 
     @AccessibilityFocusState private var foco: ZonaFocoConsulta?
     @FocusState private var campoEnfocado: Bool
+    @Environment(\.scenePhase) private var faseEscena
     /// Se fija al crear la vista y no cambia si el usuario cambia el tamaño de texto con la app abierta.
     @State private var creacionDiferida = UIApplication.shared.preferredContentSizeCategory.isAccessibilityCategory
+    /// Estado de la consulta cuyo anuncio y foco esperan a que se cierre el micrófono: VoiceOver sonaría sobre la captura.
+    @State private var anuncioDiferido: EstadoConsulta?
 
     var body: some View {
         NavigationStack {
@@ -48,7 +51,12 @@ struct ConsultaVista: View {
                         // la pila diferida hizo fallar la auditoría de Dynamic Type en el contador y en «Enviar».
                         // El resultado queda fuera para mantener su destino de foco.
                         ContenedorControles(diferido: creacionDiferida) {
-                            TextField("Pregunta", text: $modelo.texto, axis: .vertical)
+                            if let origen = modelo.origenPendiente {
+                                OrigenPendienteVista(origen: origen, alOlvidar: { modelo.olvidarOrigenPendiente() })
+                            }
+
+                            // Por `editarTexto`: una edición de la persona deja de contar como «lo dictado».
+                            TextField("Pregunta", text: Binding(get: { modelo.texto }, set: { modelo.editarTexto($0) }), axis: .vertical)
                                 .lineLimit(1...5)
                                 .textFieldStyle(.roundedBorder)
                                 .frame(minHeight: 44)
@@ -79,6 +87,10 @@ struct ConsultaVista: View {
                                         .accessibilityIdentifier("boton-cancelar")
                                 }
                             }
+
+                            if let dictado = modelo.dictado {
+                                ControlDictadoVista(dictado: dictado, foco: $foco, alAlternar: alternarDictado)
+                            }
                         }
                     }
                     .padding(16)
@@ -88,13 +100,39 @@ struct ConsultaVista: View {
             }
             .navigationTitle("Consulta")
             .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) { EnlaceRutasConsulta() }
+            }
             .onChange(of: modelo.estado) { _, nuevo in
-                anunciar(nuevo)
+                // Con el micrófono abierto no se anuncia ni se mueve el foco: se hace al cerrarlo, con el estado de entonces.
+                if modelo.dictado?.capturando == true { anuncioDiferido = nuevo } else { anuncioDiferido = nil; anunciar(nuevo) }
+            }
+            .onChange(of: modelo.dictado?.capturando) { _, capturando in
+                if capturando != true, let pendiente = anuncioDiferido {
+                    anuncioDiferido = nil
+                    anunciar(pendiente)
+                }
+            }
+            // Un dictado que no puede seguir lleva el foco a su mensaje; lo anuncia el propio modelo.
+            .onChange(of: modelo.dictado?.estado) { _, nuevo in
+                if nuevo?.esProblema == true { foco = .dictado }
+            }
+            .onAppear { modelo.dictado?.actualizarCapacidad() }
+            // En segundo plano no hay micrófono ni voz: se invalida lo mismo que al salir. Inactiva no cuenta: los avisos de
+            // permiso del sistema dejan la escena inactiva mientras la persona responde.
+            .onChange(of: faseEscena) { _, nueva in
+                if nueva == .background { modelo.salir() }
             }
         }
         // `TabView` conserva el modelo al cambiar de pestaña: una consulta lenta no
-        // debe terminar fuera de pantalla (arquitectura §7). Solo cancela la vigente.
-        .onDisappear { modelo.cancelar() }
+        // debe terminar fuera de pantalla (arquitectura §7). Cancela la vigente, el dictado y la voz de la respuesta.
+        .onDisappear { modelo.salir() }
+    }
+
+    /// Cierra el teclado antes de dictar: el micrófono y el teclado no se disputan el campo.
+    private func alternarDictado() {
+        campoEnfocado = false
+        modelo.dictado?.alternar()
     }
 
     /// Cierra el teclado antes de enviar: si no, tapa el resultado y la barra de pestañas.
@@ -154,6 +192,90 @@ private struct BotonEscenario: View {
     }
 }
 
+/// Aclaración pendiente: el origen que la persona dijo y al que falta el destino. Lo dice y deja descartarlo.
+private struct OrigenPendienteVista: View {
+    let origen: String
+    let alOlvidar: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Origen pendiente: \(origen)")
+                .font(.headline)
+                .accessibilityHint("Tu próxima pregunta se toma como el destino.")
+                .accessibilityIdentifier("origen-pendiente")
+            Button("Olvidar origen", action: alOlvidar)
+                .buttonStyle(.bordered)
+                .controlSize(.large)
+                .frame(minHeight: 44)
+                .accessibilityIdentifier("boton-olvidar-origen")
+        }
+    }
+}
+
+/// Botón del dictado y la línea que dice su estado y adónde va el audio. El campo de texto sigue siendo la alternativa.
+private struct ControlDictadoVista: View {
+    let dictado: DictadoModelo
+    var foco: AccessibilityFocusState<ZonaFocoConsulta?>.Binding
+    let alAlternar: () -> Void
+    @Environment(\.openURL) private var abrirURL
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            // Texto, icono y valor cambian con el estado: no depende del color.
+            Button(action: alAlternar) {
+                Label(TextoDictado.boton(dictado.estado), systemImage: dictado.estado.enCurso ? "stop.circle.fill" : "mic.fill")
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.large)
+            .frame(minHeight: 44)
+            .accessibilityValue(TextoDictado.valor(dictado.estado))
+            .accessibilityHint(TextoDictado.pista(dictado.estado, capacidad: dictado.capacidad))
+            .accessibilityIdentifier("boton-dictar")
+
+            Text(TextoDictado.descripcion(dictado.estado, capacidad: dictado.capacidad))
+                .font(.footnote)
+                .foregroundStyle(.textoSecundario)
+                .accessibilityFocused(foco, equals: .dictado)
+                .accessibilityIdentifier("estado-dictado")
+
+            if let rotulo = dictado.rotuloPruebas {
+                Text(rotulo)
+                    .font(.footnote)
+                    .accessibilityIdentifier("aviso-dictado-sintetico")
+            }
+
+            if dictado.estado == .permisoDenegado || dictado.estado == .permisoRestringido {
+                Button(TextoDictado.abrirAjustes) {
+                    if let url = URL(string: UIApplication.openSettingsURLString) { abrirURL(url) }
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.large)
+                .frame(minHeight: 44)
+                .accessibilityIdentifier("boton-abrir-ajustes-dictado")
+            }
+        }
+    }
+}
+
+/// Acceso a la búsqueda de rutas y al viaje entre dos lugares (EA-25). Va en la barra de navegación, como el menú de
+/// Ajustes, y no dentro del contenido desplazable: ahí cambiaría hasta dónde se desplaza la pantalla con el texto más
+/// grande. Solo el icono es visible; su etiqueta para VoiceOver es el texto.
+private struct EnlaceRutasConsulta: View {
+    @Environment(\.serviciosRutas) private var servicios
+
+    var body: some View {
+        if let servicios {
+            NavigationLink {
+                RutasVista(servicios: servicios)
+            } label: {
+                Label(TextoRutas.titulo, systemImage: "map").labelStyle(.iconOnly)
+            }
+            .accessibilityHint("Busca rutas y planea un viaje entre dos lugares.")
+            .accessibilityIdentifier("enlace-rutas")
+        }
+    }
+}
+
 /// Pila de los controles de la consulta: diferida o inmediata, con la misma disposición.
 private struct ContenedorControles<Contenido: View>: View {
     let diferido: Bool
@@ -182,7 +304,8 @@ private struct ResultadoConsultaVista: View {
                 .accessibilityIdentifier("progreso-consulta")
         case .respuesta(let respuesta):
             RespuestaVista(
-                respuesta: respuesta, escenario: modelo.escenarioEnviado, foco: foco, alReintentar: alReintentar)
+                respuesta: respuesta, escenario: modelo.escenarioEnviado, etiquetaVolver: modelo.etiquetaDeRepetir("Volver a consultar"),
+                foco: foco, alReintentar: alReintentar)
         case .error(let error):
             VStack(alignment: .leading, spacing: 8) {
                 Label("No se pudo completar", systemImage: "exclamationmark.triangle")
@@ -192,7 +315,7 @@ private struct ResultadoConsultaVista: View {
                 Text(error.mensaje).accessibilityIdentifier("mensaje-error")
                 Text(error.recuperacion).foregroundStyle(.textoSecundario)
                 if error.admiteReintento && modelo.ultimoTextoEnviado != nil {
-                    Button("Reintentar") { alReintentar() }
+                    Button(modelo.etiquetaDeRepetir("Reintentar")) { alReintentar() }
                         .buttonStyle(.bordered)
                         .controlSize(.large)
                         .frame(minHeight: 44)
@@ -207,7 +330,7 @@ private struct ResultadoConsultaVista: View {
                     .accessibilityFocused(foco, equals: .resultado)
                 Text("No se mostrará ninguna respuesta de esa pregunta.")
                 if modelo.ultimoTextoEnviado != nil {
-                    Button("Reintentar") { alReintentar() }
+                    Button(modelo.etiquetaDeRepetir("Reintentar")) { alReintentar() }
                         .buttonStyle(.bordered)
                         .controlSize(.large)
                         .frame(minHeight: 44)
@@ -222,6 +345,8 @@ private struct RespuestaVista: View {
     let respuesta: RespuestaAgente
     /// Escenario en que se hizo la pregunta: rotula el resultado.
     let escenario: EscenarioConsulta
+    /// «Volver a consultar», con el origen pendiente que reenvía si lo hay.
+    let etiquetaVolver: String
     var foco: AccessibilityFocusState<ZonaFocoConsulta?>.Binding
     let alReintentar: () -> Void
 
@@ -279,10 +404,47 @@ private struct RespuestaVista: View {
         case .ruta(let codigo): Text("Ruta: \(codigo)")
         case .ninguna, .frecuentes, .gps, .viaje: EmptyView()
         }
+        EnlaceDeAccion(accion: respuesta.accion)
         if let limite = respuesta.accion.limite {
             Text(limite)
                 .foregroundStyle(.textoSecundario)
                 .accessibilityIdentifier("limite-accion")
+        }
+    }
+
+    /// Lo que la web abre con esta acción y el iPhone también tiene (EA-25): el detalle de una ruta con su mapa, y las
+    /// rutas que pasan por una estación. Sin servicios de rutas en el entorno no se ofrece nada.
+    private struct EnlaceDeAccion: View {
+        let accion: AccionAgente
+        @Environment(\.serviciosRutas) private var servicios
+
+        var body: some View {
+            if let servicios {
+                switch accion {
+                case .ruta(let codigo):
+                    NavigationLink {
+                        DetalleRutaVista(servicios: servicios, codigo: codigo)
+                    } label: {
+                        Label("Ver la ruta \(codigo) y su mapa", systemImage: "map")
+                            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.large)
+                    .accessibilityIdentifier("enlace-ruta-detalle")
+                case .busqueda(let estacion):
+                    NavigationLink {
+                        RutasVista(servicios: servicios, consultaInicial: estacion)
+                    } label: {
+                        Label("Ver las rutas que pasan por la estación", systemImage: "list.bullet")
+                            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.large)
+                    .accessibilityIdentifier("enlace-rutas-estacion")
+                case .ninguna, .frecuentes, .gps, .viaje:
+                    EmptyView()
+                }
+            }
         }
     }
 
@@ -293,7 +455,7 @@ private struct RespuestaVista: View {
                 .font(.subheadline.bold())
             Text("El servidor respondió con datos de TransMilenio que no están actualizados: una copia guardada o una consulta vencida. Vuelve a consultar en unos minutos.")
                 .accessibilityIdentifier("aviso-catalogo-antiguo")
-            Button("Volver a consultar") { alReintentar() }
+            Button(etiquetaVolver) { alReintentar() }
                 .buttonStyle(.bordered)
                 .controlSize(.large)
                 .frame(minHeight: 44)

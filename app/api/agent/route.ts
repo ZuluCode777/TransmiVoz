@@ -1,11 +1,12 @@
 import { z } from "zod"
 import { decidirAccesoDeEntorno, respuestaDeDecision } from "@/lib/autenticacion"
+import { LIMITE_ASISTENTE, VENTANA_ASISTENTE_MS } from "@/lib/cuota-asistente"
 import { leerCuerpoLimitado } from "@/lib/cuerpo-peticion"
 import { claveCliente } from "@/lib/identidad-cliente"
 import { parseIntent, plainReply, runIntent, type AgentContext, type Intent } from "@/lib/local-agent"
 import { OLLAMA_MODEL, modeloListo, ollamaConfigured, ollamaStatus, parseIntentWithOllama, warmUpOllama } from "@/lib/ollama"
 import { createRateLimiter } from "@/lib/rate-limit"
-import { elegirIntent, requiereModelo } from "@/lib/seleccion-interprete"
+import { conOrigenPendiente, elegirIntent, requiereModelo } from "@/lib/seleccion-interprete"
 import { getTransmilenioData } from "@/lib/transmilenio-data"
 
 export const maxDuration = 30
@@ -19,11 +20,8 @@ export const maxDuration = 30
 const MAXIMO_BYTES_CUERPO = 4_000
 /** Longitud máxima de la frase que se interpreta. */
 const MAX_MESSAGE_CHARS = 300
-/** Peticiones por clave y por minuto. */
-const RATE_LIMIT = 20
-const RATE_WINDOW_MS = 60_000
-
-const rateLimit = createRateLimiter({ limit: RATE_LIMIT, windowMs: RATE_WINDOW_MS })
+/** Peticiones por clave y por minuto: una sola clave para todos los teléfonos (EA-28, #75; cálculo en `lib/cuota-asistente.ts`). */
+const rateLimit = createRateLimiter({ limit: LIMITE_ASISTENTE, windowMs: VENTANA_ASISTENTE_MS })
 
 /**
  * Guardia de acceso HTTP Basic de la ruta. `/api/agent` se excluye del `proxy`
@@ -62,6 +60,8 @@ const BodySchema = z.object({
     })
     .optional()
     .catch(undefined),
+  /** EA-19 (#45): origen que la persona dijo en el turno anterior (ver `conOrigenPendiente`). Sin él, la petición es la de siempre. */
+  pendiente: z.object({ origen: z.string().max(MAX_MESSAGE_CHARS) }).optional().catch(undefined),
 })
 
 const answer = (reply: string, status = 200, headers?: HeadersInit) => Response.json(plainReply(reply), { status, headers })
@@ -88,6 +88,7 @@ export async function POST(req: Request) {
 
   let message = ""
   let lectura: AgentContext["position"]
+  let origenPendiente: string | undefined
   // EA-10 (#36): se lee el cuerpo por stream con cota de bytes ANTES de acumular
   // todo. Un cuerpo por encima del límite corta la lectura y responde 413; un
   // error o cancelación de la lectura responde 400 sin provocar 500 ni dejar el
@@ -100,6 +101,7 @@ export async function POST(req: Request) {
     const body = BodySchema.safeParse(JSON.parse(raw))
     if (body.success) {
       message = body.data.message.slice(0, MAX_MESSAGE_CHARS)
+      origenPendiente = body.data.pendiente?.origen
       const recibida = body.data.position
       // EA-07 (#33): se conserva la lectura COMPLETA (precisión + hora) para el
       // contexto; NO se reduce a lat/lng ni se revalida aquí. La vigencia se
@@ -136,7 +138,7 @@ export async function POST(req: Request) {
   if (ollamaConfigured()) {
     if (!modeloListo()) {
       void warmUpOllama()
-    } else if (requiereModelo(intentDeReglas)) {
+    } else if (requiereModelo(intentDeReglas, origenPendiente)) {
       try {
         intentDelModelo = await parseIntentWithOllama(message, data)
       } catch (error) {
@@ -149,7 +151,9 @@ export async function POST(req: Request) {
     }
   }
 
-  const { intent, engine } = elegirIntent(intentDeReglas, intentDelModelo)
+  const elegida = elegirIntent(intentDeReglas, intentDelModelo)
+  const intent = conOrigenPendiente(elegida.intent, origenPendiente)
+  const engine = elegida.engine
   // `now` se fija AQUÍ, tras las esperas de catálogo y Ollama: `resolverIntent`
   // revalida con él la frescura de la lectura antes de resolver el efecto, así
   // una lectura que era fresca al llegar pero envejeció durante las esperas ya
