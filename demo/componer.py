@@ -299,7 +299,9 @@ def subtitulos(datos: dict, total: float) -> str:
         """Una línea a la vez: cada una dura hasta la siguiente de la misma franja o `maximo` segundos."""
         propios = [e for e in eventos if e["tipo"] in tipos]
         for i, e in enumerate(propios):
-            hasta = e["t"] + maximo
+            # En el iPhone se escribe letra por letra y una frase tarda hasta unos 20 s: «Escribe…» sigue a la vista.
+            escribe = e["tipo"] == "accion" and e.get("texto", "").startswith("Escribe")
+            hasta = e["t"] + (max(maximo, 30.0) if escribe else maximo)
             if i + 1 < len(propios):
                 hasta = min(hasta, propios[i + 1]["t"])
             if e["tipo"] == "persona":
