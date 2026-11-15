@@ -11,10 +11,12 @@
 #   <id>.eventos.jsonl   los subtítulos que anotó el recorrido, con la hora de reloj
 #   <id>.json            hora de inicio de la grabación y estado de xcodebuild (lo lee demo/componer.py)
 #   <id>.xcodebuild.log  la salida de xcodebuild
+#   capturas/<id>-NN-<qué>.png  capturas de pantalla de los momentos clave, para usarlas como fotos
 # Termina con código 1 si algún recorrido falló; los demás se graban igual.
 #
 # Variables: SIMULADOR_NOMBRE (iPhone 17), IOS_MAYOR_ESPERADO (26), DEMO_ORIGEN, DEMO_CLAVE, DEMO_CA, DEMO_SOLO y
-# DEMO_TAMANO_TEXTO (por defecto accessibility-large: el 2.º de los 5 tamaños de accesibilidad de iOS).
+# DEMO_TAMANO_TEXTO (por defecto accessibility-large: el 2.º de los 5 tamaños de accesibilidad de iOS). Un recorrido
+# puede pedir otro tamaño en la lista del final; el pie de su video dice cuál.
 #
 # El Simulator se configura como lo tendría una persona con baja visión: letra grande de accesibilidad y contraste
 # aumentado. Es configuración del teléfono, no de la app: la app es la misma de la rama.
@@ -52,25 +54,33 @@ xcrun simctl bootstatus "$udid" -b
 xcrun simctl ui "$udid" appearance light || true
 
 # Letra grande y contraste aumentado en todo el Simulator; la app recibe además el mismo tamaño al arrancar.
-tamano="${DEMO_TAMANO_TEXTO:-accessibility-large}"
-case "$tamano" in
-  accessibility-medium) categoria=UICTContentSizeCategoryAccessibilityM; nombre_tamano="1.º" ;;
-  accessibility-large) categoria=UICTContentSizeCategoryAccessibilityL; nombre_tamano="2.º" ;;
-  accessibility-extra-large) categoria=UICTContentSizeCategoryAccessibilityXL; nombre_tamano="3.º" ;;
-  accessibility-extra-extra-large) categoria=UICTContentSizeCategoryAccessibilityXXL; nombre_tamano="4.º" ;;
-  accessibility-extra-extra-extra-large) categoria=UICTContentSizeCategoryAccessibilityXXXL; nombre_tamano="5.º" ;;
-  *) echo "DEMO_TAMANO_TEXTO no es un tamaño de accesibilidad: $tamano"; exit 2 ;;
-esac
-xcrun simctl ui "$udid" content_size "$tamano" || echo "simctl no cambió el tamaño del sistema; la app lo recibe igual al arrancar."
-echo "Tamaño de letra del Simulator: $(xcrun simctl ui "$udid" content_size 2>&1)"
-configuracion="Letra grande de accesibilidad (${nombre_tamano} de 5 tamaños)"
+contraste=""
 if xcrun simctl ui "$udid" increase_contrast enabled && xcrun simctl ui "$udid" increase_contrast 2>&1 | grep -qw enabled; then
-  configuracion="$configuracion y contraste aumentado"
+  contraste=" y contraste aumentado"
   echo "Contraste aumentado: activado"
 else
   echo "No se pudo activar el contraste aumentado: el video no lo dirá."
 fi
-configuracion="$configuracion en el iPhone"
+
+# Fija el tamaño de letra del Simulator y deja en `categoria` el de la app y en `configuracion` el pie del video. Casi
+# todos los recorridos usan DEMO_TAMANO_TEXTO; uno puede pedir otro (ver la lista de `grabar` al final).
+usar_tamano() {
+  local tam="$1" descripcion
+  case "$tam" in
+    extra-extra-extra-large) categoria=UICTContentSizeCategoryXXXL; descripcion="Letra en el mayor tamaño estándar (sin los de accesibilidad)" ;;
+    accessibility-medium) categoria=UICTContentSizeCategoryAccessibilityM; descripcion="Letra grande de accesibilidad (1.º de 5 tamaños)" ;;
+    accessibility-large) categoria=UICTContentSizeCategoryAccessibilityL; descripcion="Letra grande de accesibilidad (2.º de 5 tamaños)" ;;
+    accessibility-extra-large) categoria=UICTContentSizeCategoryAccessibilityXL; descripcion="Letra grande de accesibilidad (3.º de 5 tamaños)" ;;
+    accessibility-extra-extra-large) categoria=UICTContentSizeCategoryAccessibilityXXL; descripcion="Letra grande de accesibilidad (4.º de 5 tamaños)" ;;
+    accessibility-extra-extra-extra-large) categoria=UICTContentSizeCategoryAccessibilityXXXL; descripcion="Letra grande de accesibilidad (5.º de 5 tamaños)" ;;
+    *) echo "Tamaño de letra desconocido: $tam"; exit 2 ;;
+  esac
+  xcrun simctl ui "$udid" content_size "$tam" || echo "simctl no cambió el tamaño del sistema; la app lo recibe igual al arrancar."
+  configuracion="${descripcion}${contraste} en el iPhone"
+}
+tamano="${DEMO_TAMANO_TEXTO:-accessibility-large}"
+usar_tamano "$tamano"
+echo "Tamaño de letra del Simulator: $(xcrun simctl ui "$udid" content_size 2>&1)"
 xcrun simctl status_bar "$udid" override --batteryState charged --batteryLevel 100 --wifiBars 3 --cellularBars 4 || true
 if [ -n "${DEMO_CA:-}" ]; then
   xcrun simctl keychain "$udid" add-root-cert "$DEMO_CA"
@@ -117,14 +127,43 @@ if [ -f "$registro_proxy" ]; then
   sleep 2
 fi
 
+capturas="$salida/capturas"
+mkdir -p "$capturas"
+
+# Si el Simulator no dejó escribir las capturas en la carpeta, salen de los adjuntos del resultado de xcodebuild.
+extraer_capturas() {
+  local id="$1" adjuntos="$salida/adjuntos-$1"
+  compgen -G "$capturas/$id-*.png" > /dev/null && return 0
+  [ -d "$salida/$id.xcresult" ] || return 0
+  rm -rf "$adjuntos"
+  if xcrun xcresulttool export attachments --path "$salida/$id.xcresult" --output-path "$adjuntos" > /dev/null 2>&1; then
+    python3 - "$adjuntos" "$capturas" "$id" <<'EOF' || true
+import json, re, shutil, sys
+from pathlib import Path
+origen, destino, ident = Path(sys.argv[1]), Path(sys.argv[2]), sys.argv[3]
+manifiesto = origen / "manifest.json"
+for prueba in (json.loads(manifiesto.read_text()) if manifiesto.exists() else []):
+    for adjunto in prueba.get("attachments", []):
+        nombre = adjunto.get("suggestedHumanReadableName", "")
+        archivo = origen / adjunto.get("exportedFileName", "")
+        if not nombre.startswith(ident) or not archivo.is_file():
+            continue
+        base = re.sub(r"(_\d+)?_[0-9A-Fa-f-]{36}$", "", nombre.rsplit(".", 1)[0])
+        shutil.copy(archivo, destino / f"{base}{archivo.suffix or '.png'}")
+EOF
+  fi
+  rm -rf "$adjuntos"
+}
+
 fallos=()
 pendientes=()
 grabar() {
-  local id="$1" prueba="$2"
+  local id="$1" prueba="$2" tam="${3:-$tamano}"
   if [ -n "${DEMO_SOLO:-}" ] && [[ ",$DEMO_SOLO," != *",$id,"* ]]; then return 0; fi
   local video="$salida/$id.mov" eventos="$salida/$id.eventos.jsonl" registro="$salida/$id.grabacion.log"
-  rm -f "$eventos" "$video"
+  rm -f "$eventos" "$video" "$capturas/$id-"*.png
   rm -rf "$salida/$id.xcresult"
+  usar_tamano "$tam"
   echo "▶ $id ($prueba)"
   local antes
   antes="$(python3 -c 'import time; print(time.time())')"
@@ -145,7 +184,7 @@ grabar() {
   fi
   local estado=0
   TEST_RUNNER_DEMO_EVENTOS="$eventos" TEST_RUNNER_DEMO_ORIGEN="$origen" TEST_RUNNER_DEMO_CLAVE="$clave" \
-  TEST_RUNNER_DEMO_CATEGORIA_TEXTO="$categoria" \
+  TEST_RUNNER_DEMO_CATEGORIA_TEXTO="$categoria" TEST_RUNNER_DEMO_ID="$id" TEST_RUNNER_DEMO_CAPTURAS="$capturas" \
     xcodebuild test-without-building "${comunes[@]}" -parallel-testing-enabled NO \
       -only-testing:"TransMiVozUITests/DemoVideosUITests/$prueba" \
       -resultBundlePath "$salida/$id.xcresult" > "$salida/$id.xcodebuild.log" 2>&1 || estado=$?
@@ -160,6 +199,7 @@ grabar() {
   if [ ! -s "$eventos" ]; then
     grep -o 'DEMO_EVENTO {.*}' "$salida/$id.xcodebuild.log" | sed 's/^DEMO_EVENTO //' | awk '!visto[$0]++' > "$eventos" || true
   fi
+  extraer_capturas "$id"
   python3 - "$salida/$id.json" "$id" "$inicio" "$estado" "$configuracion" "$fin_grabacion" <<'EOF'
 import json, sys
 ruta, ident, inicio, estado, configuracion = sys.argv[1], sys.argv[2], float(sys.argv[3]), int(sys.argv[4]), sys.argv[5]
@@ -175,11 +215,11 @@ json.dump({
 EOF
   if [ "$estado" -ne 0 ]; then
     fallos+=("$id")
-    pendientes+=("$id:$prueba")
+    pendientes+=("$id:$prueba:$tam")
     echo "  ✗ $id: xcodebuild terminó con $estado"
     grep -E "error:|failed|Fallo|XCTAssert" "$salida/$id.xcodebuild.log" | head -20 || true
   else
-    echo "  ✓ $id ($(wc -l < "$eventos" | tr -d ' ') eventos)"
+    echo "  ✓ $id ($(wc -l < "$eventos" | tr -d ' ') eventos, $(compgen -G "$capturas/$id-*.png" | wc -l | tr -d ' ') capturas)"
   fi
 }
 
@@ -191,6 +231,11 @@ grabar iphone-05-metro-estacion testDemo05MetroEstacion
 grabar iphone-06-sesion-accesorio testDemo06SesionConAccesorio
 grabar iphone-07-lupa testDemo07Lupa
 grabar iphone-08-ajustes testDemo08Ajustes
+grabar iphone-09-rutas-detalle testDemo09RutasYDetalle
+grabar iphone-10-viaje testDemo10Viaje
+# Dos turnos en la misma Consulta: con los tamaños de accesibilidad el campo no se reutiliza de forma fiable.
+grabar iphone-11-aclaracion testDemo11Aclaracion extra-extra-extra-large
+grabar iphone-12-avisos testDemo12Avisos
 
 # Un segundo intento para cada recorrido que falló, al final, cuando ya pasaron unos minutos.
 if [ "${#pendientes[@]}" -gt 0 ]; then
@@ -198,7 +243,10 @@ if [ "${#pendientes[@]}" -gt 0 ]; then
   repetir=("${pendientes[@]}")
   fallos=()
   pendientes=()
-  for par in "${repetir[@]}"; do grabar "${par%%:*}" "${par#*:}"; done
+  for trio in "${repetir[@]}"; do
+    IFS=: read -r id_repetir prueba_repetir tam_repetir <<< "$trio"
+    grabar "$id_repetir" "$prueba_repetir" "$tam_repetir"
+  done
 fi
 
 if [ "${#fallos[@]}" -gt 0 ]; then

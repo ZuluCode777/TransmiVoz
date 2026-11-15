@@ -10,7 +10,8 @@
 # grabación anterior en curso, así que un arreglo de la web no corta la del
 # iPhone. La composición usa la grabación cruda de esta ejecución y, para la
 # plataforma que no se grabó, la más reciente de esta rama que no haya vencido:
-# el artefacto final siempre trae los videos de las dos.
+# el artefacto final trae los videos de las dos. Con «[sin web]» no se graba la
+# web ni se completa con una grabación anterior: el artefacto trae solo el iPhone.
 name: Grabar videos de demostración
 
 on:
@@ -28,7 +29,7 @@ env:
 jobs:
   web:
     name: Grabar la app web (Chrome sin ventana)
-    if: ${{ !contains(github.event.head_commit.message, '[solo iphone]') }}
+    if: ${{ !contains(github.event.head_commit.message, '[solo iphone]') && !contains(github.event.head_commit.message, '[sin web]') }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     concurrency:
@@ -93,7 +94,7 @@ jobs:
     name: Grabar la app del iPhone (Simulator)
     if: ${{ !contains(github.event.head_commit.message, '[solo web]') }}
     runs-on: macos-26
-    timeout-minutes: 80
+    timeout-minutes: 120
     concurrency:
       group: grabar-demos-iphone-${{ github.ref }}
       cancel-in-progress: true
@@ -145,6 +146,7 @@ jobs:
             demo/salida/crudo-iphone/*.json
             demo/salida/crudo-iphone/*.jsonl
             demo/salida/crudo-iphone/*.log
+            demo/salida/crudo-iphone/capturas/*.png
           if-no-files-found: warn
           retention-days: 3
 
@@ -169,9 +171,11 @@ jobs:
       - name: Completar con la última grabación de la otra plataforma
         env:
           GH_TOKEN: ${{ github.token }}
+          MENSAJE: ${{ github.event.head_commit.message }}
         run: |
           for nombre in crudo-web crudo-iphone; do
             if [ -d "demo/salida/$nombre" ]; then echo "$nombre: de esta ejecución"; continue; fi
+            if [ "$nombre" = crudo-web ] && [[ "$MENSAJE" == *"[sin web]"* ]]; then echo "crudo-web: no se incluye ([sin web])"; continue; fi
             id="$(gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?name=$nombre&per_page=50" \
               --jq "[.artifacts[] | select(.expired == false and .workflow_run.head_branch == \"$GITHUB_REF_NAME\")] | sort_by(.created_at) | last | .id // empty")"
             if [ -z "$id" ]; then echo "$nombre: no hay una grabación anterior vigente"; continue; fi
@@ -192,6 +196,11 @@ jobs:
           entradas=()
           for d in demo/salida/crudo-web demo/salida/crudo-iphone; do [ -d "$d" ] && entradas+=("$d"); done
           python3 demo/componer.py demo/salida/videos "${entradas[@]}"
+          if [ -d demo/salida/crudo-iphone/capturas ]; then
+            mkdir -p demo/salida/videos/capturas
+            cp demo/salida/crudo-iphone/capturas/*.png demo/salida/videos/capturas/ 2>/dev/null || true
+            echo "Capturas del iPhone: $(ls demo/salida/videos/capturas | wc -l)"
+          fi
           cp demo/README.md demo/salida/videos/LEEME.md
           cat demo/salida/videos/indice.md >> "$GITHUB_STEP_SUMMARY"
 
@@ -203,6 +212,7 @@ jobs:
           path: |
             demo/salida/videos/*.mp4
             demo/salida/videos/*.jpg
+            demo/salida/videos/capturas/*.png
             demo/salida/videos/indice.md
             demo/salida/videos/indice.json
             demo/salida/videos/LEEME.md

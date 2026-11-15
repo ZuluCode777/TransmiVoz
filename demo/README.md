@@ -45,11 +45,24 @@ En la web, un círculo rosa marca dónde se toca la pantalla.
 | `iphone-06-sesion-accesorio` | Pestaña Sesión: buscar, permiso, elegir, iniciar, bloqueo por enlace no verificado, detener y reconectar |
 | `iphone-07-lupa` | Lupa: explicación del permiso, aumento, filtros y congelar |
 | `iphone-08-ajustes` | Ajustes: servidor, Preferencias, Favoritas y Ayuda |
+| `iphone-09-rutas-detalle` | Rutas: buscar «Ricaurte», abrir la primera ruta, su sentido, el mapa del recorrido y sus estaciones |
+| `iphone-10-viaje` | Viaje entre dos lugares elegidos de la lista: de Ricaurte a Calle 72, con el estado que da el servidor y, si hay tramos, su mapa |
+| `iphone-11-aclaracion` | Consulta en dos turnos: «Salgo desde Ricaurte» deja el origen pendiente y «Calle 72» lo completa |
+| `iphone-12-avisos` | Avisos: anuncios oficiales de TransMilenio con el estado de la fuente, avisos propios y la voz de los avisos |
 
 En el iPhone cada pregunta va en su propio video, con la app recién abierta:
 con letra grande de accesibilidad, el campo de la Consulta no se dejaba
 reutilizar de forma fiable desde las pruebas de interfaz tras la primera
-respuesta.
+respuesta. Por eso `iphone-11-aclaracion`, que necesita dos turnos seguidos,
+se graba con el mayor tamaño estándar de letra (sin los de accesibilidad); el
+pie de ese video lo dice.
+
+### Capturas
+
+Además de los videos, cada recorrido del iPhone guarda capturas de pantalla
+(PNG, a la resolución del Simulator) de los momentos clave, en
+`capturas/<video>-NN-<qué>.png` dentro del mismo artefacto. Sirven como fotos
+de la app del iPhone para el documento o la entrega.
 
 ## Qué es real y qué no
 
@@ -59,9 +72,12 @@ Real:
   `pnpm build` + `pnpm start`, con clave, como en producción.
 - Los datos de TransMilenio salen del servicio en vivo, o de la copia guardada
   si no responde. Las respuestas del asistente son las del código actual. En la
-  Consulta del iPhone (`iphone-01` a `iphone-05` y `iphone-08`) la app no usa
-  ningún modo de prueba: habla con ese mismo backend por HTTPS.
-- El mapa usa OpenStreetMap en vivo.
+  Consulta, las rutas, el viaje y los avisos del iPhone (`iphone-01` a
+  `iphone-05` y `iphone-08` a `iphone-12`) la app no usa ningún modo de prueba:
+  habla con ese mismo backend por HTTPS.
+- Los anuncios oficiales de `iphone-12` son los que el backend lee en ese
+  momento de las alertas GTFS-RT de TransMilenio.
+- El mapa de la web usa OpenStreetMap en vivo; el del iPhone, MapKit.
 
 Simulado, y los subtítulos lo dicen:
 
@@ -94,8 +110,9 @@ Simulado, y los subtítulos lo dicen:
   Simulator «iPhone 17» de Xcode 26.6, configurado como lo tendría una persona
   con baja visión: letra grande de accesibilidad (el 2.º de los 5 tamaños de
   accesibilidad de iOS; se cambia con `DEMO_TAMANO_TEXTO`) y contraste
-  aumentado. Es configuración del teléfono: la app es la misma. El pie del panel
-  de subtítulos dice qué configuración tenía cada grabación. La clase de demostración se copia a
+  aumentado. Es configuración del teléfono: la app es la misma. Un recorrido
+  puede pedir otro tamaño en la lista de `grabar.sh`. El pie del panel de
+  subtítulos dice qué configuración tenía cada grabación. La clase de demostración se copia a
   `ios/TransMiVozUITests/` solo en el runner, antes de compilar, y no cambia la
   suite de pruebas del proyecto. Cada recorrido se graba con
   `xcrun simctl io … recordVideo`.
@@ -107,9 +124,11 @@ Para volver a grabar solo una plataforma, el mensaje del commit puede llevar
 `[solo web]` o `[solo iphone]` (en cualquier parte del mensaje, así que no se
 mencionan los dos a la vez). Cada plataforma cancela solo su propia grabación
 anterior en curso.
-El artefacto final trae siempre las dos plataformas: para la que no se grabó,
-usa la grabación cruda más reciente de la rama (se guarda 3 días). La fecha y
-la hora de cada grabación salen en el título de cada video.
+El artefacto final trae las dos plataformas: para la que no se grabó, usa la
+grabación cruda más reciente de la rama (se guarda 3 días). Con `[sin web]` en
+el mensaje del commit no se graba la web ni se completa con una grabación
+anterior, y el artefacto trae solo el iPhone. La fecha y la hora de cada
+grabación salen en el título de cada video.
 
 Para grabar en local hacen falta Chrome o Xcode, ffmpeg y la app compilada.
 Los comandos son los mismos del workflow.

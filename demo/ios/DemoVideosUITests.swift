@@ -13,14 +13,19 @@ import XCTest
 //   DEMO_CLAVE    clave de ese backend (APP_PASSWORD)
 //   DEMO_CATEGORIA_TEXTO  tamaño de letra de la app (por defecto, el 2.º tamaño de accesibilidad); el script pone el
 //                 mismo en todo el Simulator, junto con el contraste aumentado, como lo tendría una persona con baja visión
+//   DEMO_ID       identificador del video (iphone-01-…): da nombre a las capturas
+//   DEMO_CAPTURAS carpeta donde se guardan las capturas de pantalla (PNG) de los momentos clave
 
 private let entorno = ProcessInfo.processInfo.environment
 private let origenServidor = entorno["DEMO_ORIGEN"] ?? "https://localhost:8443"
 private let claveServidor = entorno["DEMO_CLAVE"] ?? ""
 private let categoriaTexto = entorno["DEMO_CATEGORIA_TEXTO"] ?? "UICTContentSizeCategoryAccessibilityL"
+private let idVideo = entorno["DEMO_ID"] ?? "iphone"
+private let carpetaCapturas = entorno["DEMO_CAPTURAS"] ?? ""
 
 final class DemoVideosUITests: XCTestCase {
     private var app: XCUIApplication!
+    private var capturas = 0
 
     override func setUpWithError() throws {
         continueAfterFailure = false
@@ -52,6 +57,22 @@ final class DemoVideosUITests: XCTestCase {
     private func pantalla(_ texto: String) { anotar("pantalla", texto) }
 
     private func pausa(_ segundos: TimeInterval) { Thread.sleep(forTimeInterval: segundos) }
+
+    /// Guarda una captura de la pantalla del iPhone (PNG, a la resolución del Simulator) para usarla como foto. Va también
+    /// como adjunto del resultado de xcodebuild, por si el Simulator no deja escribir en la carpeta.
+    private func captura(_ nombre: String) {
+        capturas += 1
+        let imagen = XCUIScreen.main.screenshot()
+        let archivo = "\(idVideo)-\(String(format: "%02d", capturas))-\(nombre)"
+        let adjunto = XCTAttachment(screenshot: imagen)
+        adjunto.name = archivo
+        adjunto.lifetime = .keepAlways
+        add(adjunto)
+        guard !carpetaCapturas.isEmpty else { return }
+        let carpeta = URL(fileURLWithPath: carpetaCapturas, isDirectory: true)
+        try? FileManager.default.createDirectory(at: carpeta, withIntermediateDirectories: true)
+        try? imagen.pngRepresentation.write(to: carpeta.appendingPathComponent("\(archivo).png"))
+    }
 
     // MARK: Ayudas
 
@@ -212,6 +233,7 @@ final class DemoVideosUITests: XCTestCase {
         XCTAssertTrue(resumen.waitForExistence(timeout: 15))
         if resumen.label.contains(origenServidor.replacingOccurrences(of: "https://", with: "")), resumen.label.contains("con clave") {
             pantalla(resumen.label)
+            captura("ajustes-servidor")
             pausa(2.0)
             return
         }
@@ -237,6 +259,7 @@ final class DemoVideosUITests: XCTestCase {
         XCTAssertTrue(mensaje.waitForExistence(timeout: 10), "No apareció el mensaje de Ajustes")
         mostrar("resumen-ajustes", haciaAtras: true)
         pantalla(mensaje.label)
+        captura("ajustes-servidor")
         pausa(3.0)
     }
 
@@ -252,14 +275,17 @@ final class DemoVideosUITests: XCTestCase {
             cerrarTeclado()
             mostrar("boton-enviar")
         }
-        tocar(enviar, "Toca «Enviar»")
-        _ = app.keyboards.firstMatch.waitForNonExistence(timeout: 5)
         let respuesta = elemento("texto-respuesta")
         let viaje = elemento("aviso-viaje")
         let error = elemento("mensaje-error")
+        // En un segundo turno la respuesta anterior sigue a la vista hasta que la app pasa a «Consultando»: se espera una
+        // respuesta distinta de esa.
+        let anterior = respuesta.exists ? respuesta.label : nil
+        tocar(enviar, "Toca «Enviar»")
+        _ = app.keyboards.firstMatch.waitForNonExistence(timeout: 5)
         func esperarResultado() {
             let limite = Date().addingTimeInterval(25)
-            while Date() < limite, !respuesta.exists, !viaje.exists, !error.exists { pausa(0.3) }
+            while Date() < limite, !viaje.exists, !error.exists, !respuesta.exists || respuesta.label == anterior { pausa(0.3) }
             _ = elemento("progreso-consulta").waitForNonExistence(timeout: 20)
             pausa(0.5)
         }
@@ -294,6 +320,7 @@ final class DemoVideosUITests: XCTestCase {
         XCTAssertTrue(respuesta.exists || viaje.exists || error.exists, "No llegó ninguna respuesta a «\(texto)»")
         // El resultado va encima del campo: se sube a su comienzo y se recorre, que con letra grande mide varias pantallas.
         mostrar(viaje.exists ? "aviso-viaje" : (error.exists ? "mensaje-error" : "texto-respuesta"), haciaAtras: true, comienzo: true)
+        captura("respuesta")
         pausa(3.5)
         arrastrar(380)
         pausa(2.5)
@@ -406,6 +433,7 @@ final class DemoVideosUITests: XCTestCase {
         let estado = ["titulo-estado-accesorio", "estado-accesorio", "estado-accesorio-1", "estado-accesorio-2"]
             .map { elemento($0) }.filter { $0.exists }.map { $0.label }
         pantalla(estado.joined(separator: " "))
+        captura("sesion-bloqueada")
         nota("Con el transporte sintético el enlace no se verifica, así que la app bloquea los avisos y no usa ninguna medida.")
         pausa(6.0)
         arrastrar(300)
@@ -448,6 +476,7 @@ final class DemoVideosUITests: XCTestCase {
             pausa(1.2)
         }
         if let valor = aumento.value as? String { pantalla("Aumento: \(valor)") }
+        captura("lupa-aumento")
         pausa(1.5)
         mostrar("filtro-invertir")
         for (id, nombre) in [("filtro-fluorescente", "Fluorescente"), ("filtro-blancoYNegro", "Blanco y negro"),
@@ -463,6 +492,7 @@ final class DemoVideosUITests: XCTestCase {
         tocar(congelar, "Toca «Congelar imagen»")
         esperar(congelar, "label == %@", "Reanudar", "No se congeló la imagen")
         pantalla(visor.value as? String ?? "Imagen congelada")
+        captura("lupa-congelada")
         pausa(2.5)
         tocar(congelar, "Toca «Reanudar»")
         esperar(congelar, "label == %@", "Congelar imagen", "No se reanudó la imagen")
@@ -477,6 +507,7 @@ final class DemoVideosUITests: XCTestCase {
             tocar(elemento("menu-mas-ajustes"), "Toca «Más ajustes»")
             tocar(etiquetado(seccion), "Elige «\(seccion)»")
             pausa(1.5)
+            captura("ajustes-\(seccion.lowercased())")
             switch seccion {
             case "Favoritas":
                 let vacio = elemento("favoritas-vacio")
@@ -496,5 +527,278 @@ final class DemoVideosUITests: XCTestCase {
             pausa(1.0)
         }
         terminar()
+    }
+
+    // MARK: Rutas, viaje y avisos (lo fusionado el 13/11: #94, #92, #93 y #95)
+
+    /// Consulta ▸ el botón del mapa de la barra de navegación abre «Rutas y viaje».
+    private func abrirRutas() {
+        tocar(elemento("enlace-rutas"), "Toca el botón «Rutas y viaje» de la barra (icono de mapa)")
+        XCTAssertTrue(elemento("campo-busqueda-rutas").waitForExistence(timeout: 15), "No se abrió la búsqueda de rutas")
+        pausa(1.0)
+        let introduccion = elemento("introduccion-rutas")
+        if introduccion.exists { pantalla(introduccion.label) }
+        pausa(2.5)
+    }
+
+    /// Espera lo que diga `listo` o un error del planificador. Con el error y «Reintentar» a la vista, lo usa una sola vez,
+    /// como haría una persona; si tampoco llega, el video no muestra la función y se marca como fallido.
+    private func esperarPlanificador(_ descripcion: String, listo: () -> Bool) {
+        let error = elemento("mensaje-error-rutas")
+        for intento in 0..<2 {
+            let limite = Date().addingTimeInterval(25)
+            while Date() < limite, !listo(), !error.exists { pausa(0.3) }
+            pausa(0.5)
+            if listo() { return }
+            let reintentar = elemento("boton-reintentar-rutas")
+            guard intento == 0, error.exists, reintentar.exists else { break }
+            pantalla("No se pudo completar: \(error.label)")
+            nota("El servidor tardó o falló; la pantalla lo dice y ofrece «Reintentar».")
+            pausa(2.5)
+            mostrar("boton-reintentar-rutas")
+            tocar(reintentar, "Toca «Reintentar»")
+        }
+        if error.exists { pantalla("No se pudo completar: \(error.label)") }
+        XCTAssertTrue(listo(), "No llegó \(descripcion)")
+    }
+
+    /// Baja, con tope, hasta que exista el elemento (las listas largas se crean al desplazarse) y luego lo muestra.
+    private func bajarHasta(_ identificador: String, maximo: Int = 10) {
+        let objetivo = elemento(identificador)
+        var gestos = 0
+        while !objetivo.exists, gestos < maximo {
+            arrastrar(300)
+            gestos += 1
+        }
+        if objetivo.exists { mostrar(identificador) }
+    }
+
+    /// Abre la lista de lugares del servidor, la filtra por `nombre` y elige el primero que lo contiene.
+    private func elegirLugar(_ selector: String, _ nombre: String) {
+        let fila = elemento(selector)
+        mostrar(selector)
+        let antes = fila.label
+        tocar(fila, "Toca «\(antes)»")
+        let filtro = elemento("filtro-lugares")
+        XCTAssertTrue(filtro.waitForExistence(timeout: 15), "No se abrió la lista de lugares")
+        pausa(1.0)
+        escribir(nombre, en: filtro, descripcion: "Escribe «\(nombre)» para filtrar la lista")
+        let lugar = app.descendants(matching: .any).matching(
+            NSPredicate(format: "identifier BEGINSWITH 'lugar-' AND label CONTAINS[c] %@", nombre)).firstMatch
+        XCTAssertTrue(lugar.waitForExistence(timeout: 10), "El servidor no ofrece un lugar que contenga «\(nombre)»")
+        pausa(1.5)
+        if !lugar.isHittable {
+            // El filtro es de una línea: «intro» cierra el teclado sin elegir nada.
+            app.typeText("\n")
+            if !app.keyboards.firstMatch.waitForNonExistence(timeout: 4) { cerrarTeclado() }
+            mostrar(lugar.identifier)
+        }
+        let elegido = lugar.label
+        tocar(lugar, "Elige «\(elegido)»")
+        XCTAssertTrue(fila.waitForExistence(timeout: 15), "No volvió al viaje")
+        esperar(fila, "label != %@", antes, "El selector no cambió tras elegir «\(elegido)»")
+        pantalla(fila.label)
+        pausa(1.5)
+    }
+
+    func testDemo09RutasYDetalle() throws {
+        lanzar([], titulo: "Rutas: buscar por estación y abrir el detalle con su mapa")
+        nota("Las rutas y su detalle vienen del backend Next.js con datos reales de TransMilenio. No se envía la ubicación.")
+        abrirConsultaConServidor()
+        abrirRutas()
+        mostrar("campo-busqueda-rutas")
+        escribir("Ricaurte", en: elemento("campo-busqueda-rutas"))
+        accion("Toca «Buscar» en el teclado")
+        app.typeText("\n")
+        if !app.keyboards.firstMatch.waitForNonExistence(timeout: 4) {
+            cerrarTeclado()
+            mostrar("boton-buscar-rutas")
+            tocar(elemento("boton-buscar-rutas"), "Toca «Buscar rutas»")
+        }
+        let resumen = elemento("resumen-busqueda-rutas")
+        esperarPlanificador("el resultado de la búsqueda de «Ricaurte»") { resumen.exists }
+        mostrar("resumen-busqueda-rutas", haciaAtras: true, comienzo: true)
+        pantalla(resumen.label)
+        captura("rutas-busqueda")
+        pausa(3.5)
+
+        // Las filas son «ruta-<código>»; «ruta-por-el-trazado-» y «ruta-candidata-» son del resultado de un viaje.
+        let primera = app.descendants(matching: .any).matching(NSPredicate(format:
+            "identifier BEGINSWITH 'ruta-' AND NOT identifier BEGINSWITH 'ruta-por-el-trazado-' AND NOT identifier BEGINSWITH 'ruta-candidata-'"
+        )).firstMatch
+        XCTAssertTrue(primera.waitForExistence(timeout: 10), "La búsqueda no devolvió rutas")
+        let identificador = primera.identifier
+        let codigo = String(identificador.dropFirst("ruta-".count))
+        mostrar(identificador)
+        pausa(1.5)
+        tocar(primera, "Toca la ruta \(codigo)")
+
+        let titulo = elemento("detalle-ruta-titulo")
+        esperarPlanificador("el detalle de la ruta \(codigo)") { titulo.exists }
+        mostrar("detalle-ruta-titulo", haciaAtras: true, comienzo: true)
+        var partes = [titulo.label]
+        let trayecto = elemento("detalle-ruta-trayecto")
+        if trayecto.exists { partes.append(trayecto.label) }
+        pantalla(partes.joined(separator: ". "))
+        captura("rutas-detalle")
+        pausa(3.5)
+        let sentido = elemento("aviso-sentido")
+        if sentido.exists {
+            mostrar("aviso-sentido", comienzo: true)
+            pantalla(sentido.label)
+            pausa(3.5)
+        }
+        bajarHasta("mapa-recorrido", maximo: 6)
+        if elemento("mapa-recorrido").exists {
+            nota("Mapa del mismo recorrido (MapKit). Lo esencial también está en el listado de estaciones.")
+            pausa(2.5)
+            captura("rutas-mapa")
+            pausa(2.5)
+        }
+        bajarHasta("titulo-estaciones")
+        let estaciones = elemento("titulo-estaciones")
+        if estaciones.exists {
+            pantalla(estaciones.label)
+            pausa(2.0)
+            arrastrar(380)
+            captura("rutas-estaciones")
+            pausa(2.5)
+            arrastrar(380)
+            pausa(2.5)
+        }
+        terminar()
+    }
+
+    func testDemo10Viaje() throws {
+        lanzar([], titulo: "Viaje entre dos lugares elegidos de una lista: de Ricaurte a Calle 72")
+        nota("Origen y destino se eligen de la lista del servidor: no se escribe una frase ni se envía la ubicación.")
+        abrirConsultaConServidor()
+        abrirRutas()
+        mostrar("enlace-viaje", haciaAtras: true)
+        tocar(elemento("enlace-viaje"), "Toca «Planear un viaje entre dos lugares»")
+        let origen = elemento("selector-origen")
+        esperarPlanificador("la lista de lugares") { origen.exists }
+        let introduccion = elemento("introduccion-viaje")
+        if introduccion.exists { pantalla(introduccion.label) }
+        pausa(2.5)
+        elegirLugar("selector-origen", "Ricaurte")
+        elegirLugar("selector-destino", "Calle 72")
+        mostrar("boton-planear-viaje")
+        captura("viaje-seleccion")
+        tocar(elemento("boton-planear-viaje"), "Toca «Planear viaje»")
+
+        let titulo = elemento("resultado-viaje-titulo")
+        esperarPlanificador("el resultado del viaje") { titulo.exists }
+        mostrar("resultado-viaje-titulo", comienzo: true)
+        let notas = app.descendants(matching: .any).matching(identifier: "nota-viaje").allElementsBoundByIndex.map { $0.label }
+        pantalla(([titulo.label] + notas).joined(separator: " "))
+        nota("El servidor decide el estado del viaje; la app no lo recalcula ni da órdenes de abordaje sin paradas verificadas.")
+        captura("viaje-resultado")
+        pausa(4.5)
+        for id in ["tramo-1", "tramo-2", "ruta-candidata-1", "ruta-candidata-2"] where elemento(id).exists {
+            mostrar(id, comienzo: true)
+            pantalla(elemento(id).label)
+            pausa(3.0)
+        }
+        let porElTrazado = app.descendants(matching: .any).matching(
+            NSPredicate(format: "identifier BEGINSWITH 'ruta-por-el-trazado-'")).firstMatch
+        if porElTrazado.exists {
+            mostrar(porElTrazado.identifier)
+            pantalla(porElTrazado.label)
+            captura("viaje-rutas-por-el-trazado")
+            pausa(3.0)
+        }
+        if elemento("tramo-1").exists {
+            bajarHasta("mapa-recorrido", maximo: 6)
+            if elemento("mapa-recorrido").exists {
+                nota("Mapa de los mismos tramos del listado (MapKit).")
+                pausa(2.5)
+                captura("viaje-mapa")
+                pausa(2.5)
+            }
+        }
+        terminar()
+    }
+
+    /// Con los tamaños de accesibilidad la Consulta crea sus controles al desplazarse y, tras la primera respuesta, el campo
+    /// no se dejaba reutilizar de forma fiable. Este recorrido necesita dos turnos en la misma sesión, así que `grabar.sh`
+    /// lo graba con el mayor tamaño estándar de letra (sin los de accesibilidad); el pie del video lo dice.
+    func testDemo11Aclaracion() throws {
+        lanzar([], titulo: "Consulta en dos turnos: primero el origen y después el destino")
+        nota("Aquí se escribe porque el Simulator no tiene micrófono; en el iPhone se puede decir con «Dictar pregunta».")
+        abrirConsultaConServidor()
+        preguntar("Salgo desde Ricaurte")
+        let pendiente = elemento("origen-pendiente")
+        XCTAssertTrue(pendiente.waitForExistence(timeout: 10), "No quedó el origen pendiente tras «Salgo desde Ricaurte»")
+        mostrar("origen-pendiente")
+        pantalla(pendiente.label)
+        nota("La app guarda el origen: la próxima pregunta se toma como el destino.")
+        captura("origen-pendiente")
+        pausa(4.0)
+        preguntar("Calle 72")
+        if !elemento("origen-pendiente").exists {
+            nota("La segunda pregunta usó el origen guardado y el origen pendiente desapareció.")
+            pausa(3.0)
+        }
+        terminar()
+    }
+
+    func testDemo12Avisos() throws {
+        lanzar([], titulo: "Avisos: anuncios oficiales de TransMilenio y avisos propios de la app")
+        abrirConsultaConServidor()
+        abrirPestana("Avisos")
+        nota("Los anuncios oficiales los pide la app al backend, que lee las alertas que publica TransMilenio (GTFS-RT).")
+        let estado = elemento("anuncios-estado")
+        XCTAssertTrue(estado.waitForExistence(timeout: 15), "La pestaña Avisos no muestra el estado de los anuncios")
+        pausa(1.0)
+        let progreso = elemento("anuncios-progreso")
+        let limite = Date().addingTimeInterval(30)
+        while Date() < limite, progreso.exists { pausa(0.3) }
+        pausa(0.8)
+        var partes = [estado.label]
+        for indice in 0..<4 {
+            let mensaje = elemento("anuncios-mensaje-\(indice)")
+            guard mensaje.exists else { break }
+            partes.append(mensaje.label)
+        }
+        pantalla(partes.joined(separator: " "))
+        captura("avisos-anuncios")
+        pausa(4.0)
+        let anuncio = app.descendants(matching: .any).matching(
+            NSPredicate(format: "identifier BEGINSWITH 'anuncio-' AND identifier ENDSWITH '-titulo'")).firstMatch
+        if anuncio.exists {
+            mostrar(anuncio.identifier)
+            pantalla("Anuncio oficial: \(anuncio.label)")
+            captura("avisos-anuncio")
+            pausa(3.5)
+            arrastrar(380)
+            pausa(2.5)
+        }
+        mostrar("encabezado-avisos-propios")
+        let propios = frases("avisos-propios-vacio")
+        if !propios.isEmpty { pantalla(propios) }
+        captura("avisos-propios")
+        pausa(3.5)
+        mostrar("interruptor-silenciar-advertencias")
+        let silenciar = elemento("etiqueta-silenciar-advertencias")
+        if silenciar.exists { pantalla(([silenciar.label] + [frases("nota-silencio-avisos")]).joined(separator: ". ")) }
+        captura("avisos-voz")
+        pausa(4.0)
+        mostrar("escenario-simulado", comienzo: true)
+        let simulado = frases("escenario-simulado")
+        if !simulado.isEmpty { pantalla(simulado) }
+        pausa(3.0)
+        terminar()
+    }
+
+    /// Las frases de un párrafo de Avisos: la primera lleva `id` y las demás `id-1`, `id-2`…
+    private func frases(_ id: String) -> String {
+        var textos: [String] = []
+        for posicion in 0..<6 {
+            let parte = elemento(posicion == 0 ? id : "\(id)-\(posicion)")
+            guard parte.exists else { break }
+            textos.append(parte.label)
+        }
+        return textos.joined(separator: " ")
     }
 }
