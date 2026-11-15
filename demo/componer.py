@@ -242,10 +242,12 @@ def componer(json_path: Path, salida: Path) -> dict:
         # cortaba con esas marcas desplazadas, y el video salía cortado, con cuadros perdidos (la escritura aparecía de
         # golpe) y desfasado de los subtítulos. Se decodifica desde el principio, sin la lista de ediciones (simctl
         # escribe una sola, trivial), se pasa a 30 cuadros/s repitiendo el último cuadro en los ratos quietos y se recorta
-        # después, sobre los cuadros ya ordenados.
-        entrada = ["-ignore_editlist", "1", "-i", str(video)]
+        # después, sobre los cuadros ya ordenados. `-copyts` conserva la hora de cada cuadro tal como está en el archivo:
+        # sin él, ffmpeg toma como inicio la marca de decodificación desplazada (hasta 95 s antes del primer cuadro) y la
+        # imagen se adelanta a los subtítulos.
+        entrada = ["-ignore_editlist", "1", "-copyts", "-i", str(video)]
         previo = (
-            "setpts=PTS-STARTPTS,fps=30,tpad=stop_mode=clone:stop_duration=30,"
+            "fps=30,tpad=stop_mode=clone:stop_duration=30,"
             f"trim=start={inicio:.3f}:duration={total:.3f},setpts=PTS-STARTPTS,"
         )
     else:
