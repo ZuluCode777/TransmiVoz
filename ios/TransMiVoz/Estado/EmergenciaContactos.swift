@@ -28,6 +28,13 @@ enum TextoEmergencia {
         "La llamada no se hace sola: tú la confirmas.",
     ]
 
+    /// «La app dijo»: el texto equivalente al audio, con su «Repetir» (`especificacion-accesibilidad.md` §5).
+    static let appDijo = "La app dijo"
+    static let repetir = "Repetir"
+    static let repetirEtiqueta = "Repetir lo que dijo la app"
+    static let dichaEnVozAlta = "Se dijo en voz alta."
+    static let sonandoOtroAviso = "No se dijo en voz alta: suena otro aviso de la app y no se le corta. Pulsa Repetir cuando termine."
+
     /// Lo que lee VoiceOver de una fila de «Otras líneas» (igual que `speak` de la web al enfocarla).
     static func etiqueta(_ llamada: LlamadaAyuda) -> String { "\(llamada.nombre). Número \(llamada.numero)." }
 }

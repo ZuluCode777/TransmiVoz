@@ -8,7 +8,12 @@ enum PermisoDiagnostico: Equatable, Sendable {
 
 /// Qué pasó al intentar decir la frase de prueba por la voz compartida de la app (`ControlVoz`).
 enum HablaDiagnostico: Equatable, Sendable {
-    case iniciada
+    /// La frase propia sonó entera: nadie la cortó ni la reemplazó (`ControlVoz.ultimaSeOyoEntera`). Es lo único que cuenta como éxito.
+    case dichaEntera
+    /// Empezó pero no terminó: otro aviso la reemplazó, una llamada o el sistema la cortó, o la prueba se canceló.
+    case interrumpida
+    /// Seguía sonando al vencer el tope: se cortó (solo la propia).
+    case noTerminoATiempo
     /// La app solo habla por auriculares: por el altavoz no suena (política de `ControlVoz`).
     case rutaNoPrivada
     /// La voz propia de la app está apagada (VoiceOver activo, o la persona la apagó): la regla de `ControlVoz.permitida`.
@@ -152,8 +157,14 @@ enum DiagnosticoTexto {
             ? "Sin voz en español instalada: usa la voz por defecto."
             : (vocesEnEspanol == 1 ? "1 voz en español." : "\(vocesEnEspanol) voces en español.")
         switch habla {
-        case .iniciada:
-            return ResultadoPrueba(estado: vocesEnEspanol == 0 ? .atencion : .correcto, detalle: "\(voces) Debiste oír «Prueba de voz».")
+        case .dichaEntera:
+            return ResultadoPrueba(estado: vocesEnEspanol == 0 ? .atencion : .correcto, detalle: "\(voces) La frase terminó entera: debiste oír «Prueba de voz».")
+        case .interrumpida:
+            return ResultadoPrueba(
+                estado: .atencion,
+                detalle: "\(voces) La frase se interrumpió antes de terminar (otro aviso, una llamada o el sistema la cortó). Vuelve a probar.")
+        case .noTerminoATiempo:
+            return ResultadoPrueba(estado: .atencion, detalle: "\(voces) La frase no terminó a tiempo y se cortó. Vuelve a probar.")
         case .rutaNoPrivada:
             return ResultadoPrueba(
                 estado: .atencion,

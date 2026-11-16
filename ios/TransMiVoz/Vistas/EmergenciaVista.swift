@@ -8,6 +8,8 @@ import SwiftUI
 /// «Emergencia»: las pruebas de Inicio abren la pantalla por él.
 struct EmergenciaVista: View {
     @State private var voz: EmergenciaVozModelo
+    /// Lleva el foco de VoiceOver al resultado de «Repetir»: es el único canal, no se anuncia además.
+    @AccessibilityFocusState private var enResultado: Bool
 
     init(voz: ControlVoz) {
         _voz = State(initialValue: EmergenciaVozModelo(voz: voz))
@@ -36,6 +38,7 @@ struct EmergenciaVista: View {
                         .fixedSize(horizontal: false, vertical: true)
                         .accessibilityIdentifier(posicion == 0 ? "emergencia-aclaracion" : "emergencia-aclaracion-\(posicion)")
                 }
+                appDijo
             }
             .padding(16)
         }
@@ -44,8 +47,40 @@ struct EmergenciaVista: View {
         .bordeInferiorLegible()
         .bordeSuperiorNitido()
         .onAppear { voz.decirIntroduccion() }
+        .onChange(of: voz.repeticiones) { _, _ in enResultado = true }
         // Al salir se corta solo esta locución: la voz no sigue hablando de una pantalla que ya no se ve.
         .onDisappear { voz.salir() }
+    }
+}
+
+extension EmergenciaVista {
+    /// «La app dijo» con «Repetir»: lo mismo que dice la voz, en texto (no solo por audio), y cómo salió. Va al final para que el
+    /// botón rojo siga siendo lo primero.
+    fileprivate var appDijo: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(TextoEmergencia.appDijo)
+                .font(.jakarta(.bold, .xl))
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityAddTraits(.isHeader)
+                .accessibilityIdentifier("emergencia-app-dijo")
+            Text(TextoEmergencia.introHablada)
+                .font(.jakarta(.regular, .lg))
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityIdentifier("emergencia-app-dijo-texto")
+            if let resultado = voz.resultado {
+                Text(resultado)
+                    .font(.jakarta(.semibold, .base))
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityFocused($enResultado)
+                    .accessibilityIdentifier("emergencia-app-dijo-resultado")
+            }
+            Button(TextoEmergencia.repetir) { voz.repetir() }
+                .buttonStyle(EstiloBotonSecundario())
+                .accessibilityLabel(TextoEmergencia.repetirEtiqueta)
+                .accessibilityIdentifier("emergencia-repetir")
+        }
+        .tarjetaWeb()
+        .padding(.top, 8)
     }
 }
 

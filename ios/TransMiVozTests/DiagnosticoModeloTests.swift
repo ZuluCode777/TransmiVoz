@@ -186,11 +186,64 @@ final class DiagnosticoModeloTests: XCTestCase {
         XCTAssertEqual(salida.completas, [DiagnosticoTexto.fraseDeVoz], "la frase sonó entera: nadie la cortó")
     }
 
-    func testUnaFraseQueNoTerminaSeCortaPeroSoloSiSigueSiendoLaPropia() async {
+    /// Un resultado que no es éxito: ni correcto ni fallo, dice que la frase no terminó.
+    private func comprobarNoPasa(_ resultado: ResultadoPrueba, _ texto: String, file: StaticString = #filePath, line: UInt = #line) {
+        XCTAssertEqual(resultado.estado, .atencion, "una frase que no sonó entera no es éxito", file: file, line: line)
+        XCTAssertTrue(resultado.detalle.contains(texto), resultado.detalle, file: file, line: line)
+    }
+
+    func testUnaFraseQueNoTerminaAlVencerElTopeSeCortaPeroNoPasa() async {
         let (voz, salida) = bancoDeVoz()
         let resultado = await SondaVoz(voz: voz, vocesEnEspanol: { 1 }, tope: 0.1).ejecutar()
-        XCTAssertEqual(resultado.estado, .correcto)
+        comprobarNoPasa(resultado, "no terminó a tiempo")
         XCTAssertEqual(salida.cortadas, [DiagnosticoTexto.fraseDeVoz], "al vencer el tope corta su propia frase")
+    }
+
+    func testUnAvisoUrgenteQueReemplazaLaFraseLaDejaSonarYLaPruebaNoPasa() async {
+        let (voz, salida) = bancoDeVoz()
+        let reemplazo = Task { try? await Task.sleep(nanoseconds: 100_000_000); voz.anunciar("Objeto cerca.", prioridad: .urgente) }
+        let resultado = await SondaVoz(voz: voz, vocesEnEspanol: { 2 }, tope: 5).ejecutar()
+        await reemplazo.value
+        comprobarNoPasa(resultado, "se interrumpió")
+        XCTAssertEqual(salida.dicho, [DiagnosticoTexto.fraseDeVoz, "Objeto cerca."])
+        XCTAssertEqual(salida.cortadas, [DiagnosticoTexto.fraseDeVoz], "solo se cortó la frase de la prueba")
+        XCTAssertTrue(salida.hablando, "el aviso urgente sigue sonando")
+    }
+
+    func testUnaInterrupcionOUnCorteDelSistemaNoCuentanComoFraseDicha() async {
+        let (voz, _) = bancoDeVoz()
+        let llamada = Task { try? await Task.sleep(nanoseconds: 100_000_000); voz.interrupcion(comenzo: true) }
+        let porLlamada = await SondaVoz(voz: voz, vocesEnEspanol: { 2 }, tope: 5).ejecutar()
+        await llamada.value
+        comprobarNoPasa(porLlamada, "se interrumpió")
+
+        let (otraVoz, otraSalida) = bancoDeVoz()
+        let siri = Task { try? await Task.sleep(nanoseconds: 100_000_000); otraSalida.sistemaCancela() }
+        let porElSistema = await SondaVoz(voz: otraVoz, vocesEnEspanol: { 2 }, tope: 5).ejecutar()
+        await siri.value
+        comprobarNoPasa(porElSistema, "se interrumpió")
+    }
+
+    func testCancelarLaPruebaCortaSuFraseYNoPasa() async {
+        let (voz, salida) = bancoDeVoz()
+        let tarea = Task { await SondaVoz(voz: voz, vocesEnEspanol: { 2 }, tope: 5).ejecutar() }
+        while salida.dicho.isEmpty { try? await Task.sleep(nanoseconds: 10_000_000) }
+        tarea.cancel()
+        let resultado = await tarea.value
+        comprobarNoPasa(resultado, "se interrumpió")
+        XCTAssertEqual(salida.cortadas, [DiagnosticoTexto.fraseDeVoz])
+    }
+
+    func testCancelarDespuesDeQueUnAvisoLaReemplazoNoCortaElAviso() async {
+        let (voz, salida) = bancoDeVoz()
+        let tarea = Task { await SondaVoz(voz: voz, vocesEnEspanol: { 2 }, tope: 5).ejecutar() }
+        while salida.dicho.isEmpty { try? await Task.sleep(nanoseconds: 10_000_000) }
+        voz.anunciar("Pérdida del accesorio.", prioridad: .urgente)
+        tarea.cancel()
+        let resultado = await tarea.value
+        comprobarNoPasa(resultado, "se interrumpió")
+        XCTAssertEqual(salida.cortadas, [DiagnosticoTexto.fraseDeVoz], "el aviso del accesorio no se corta")
+        XCTAssertTrue(salida.hablando)
     }
 
     func testSinSalidaPrivadaOConLaVozApagadaNoHablaYLoDiceEnVezDeDarloPorBueno() async {
