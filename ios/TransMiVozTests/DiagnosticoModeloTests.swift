@@ -44,6 +44,8 @@ private struct PlanificadorDeMentira: ClientePlanificador {
     func detalleRuta(codigo: String) async throws -> DetalleRuta { throw ErrorConsulta.cancelada }
     func listarLugares() async throws -> ListaLugares { try resultado.get() }
     func planearViaje(origen: String, destino: String) async throws -> PlanViaje { throw ErrorConsulta.cancelada }
+    func metroLinea1() async throws -> RespuestaMetro { throw ErrorConsulta.cancelada }
+    func estacionesCercanas(_ lectura: LecturaParaEnviar) async throws -> RespuestaEstacionesCercanas { throw ErrorConsulta.cancelada }
 }
 
 @MainActor
