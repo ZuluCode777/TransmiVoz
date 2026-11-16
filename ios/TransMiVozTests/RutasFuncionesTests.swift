@@ -430,6 +430,9 @@ final class RutasAlternativasTests: XCTestCase {
 
     func testSeRechazanLasAlternativasQueElContratoNoPermite() async {
         let invalidas = [
+            // presente, pero nulo o sin elementos
+            conAlternativas(FixturesPlanificador.viajeOperativo, "null"),
+            conAlternativas(FixturesPlanificador.viajeOperativo, "[]"),
             // más de dos
             conAlternativas(FixturesPlanificador.viajeOperativo, #"[{"codigoRuta":"A"},{"codigoRuta":"B"},{"codigoRuta":"C"}]"#),
             // con un transbordo (dos tramos)
