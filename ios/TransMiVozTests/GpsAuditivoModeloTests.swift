@@ -1022,4 +1022,214 @@ final class GpsAuditivoModeloTests: XCTestCase {
         banco.modelo.abrirEnMapas(centroNombre) // la lista de una posición vencida ya no está
         XCTAssertTrue(banco.abridor.aperturas.isEmpty)
     }
+
+    // MARK: «La app dijo» (EA-02 §5): todo lo que se dice queda en texto y se puede repetir
+
+    /// Lo que el sistema no puede recuperar con «Repetir indicación» (que pide otra consulta y dice la dirección del servidor):
+    /// la primera frase, la activación, el permiso, Mapas y el aviso de ubicación vencida.
+    func testTodoLoQueSeDiceQuedaExactoEnLaTranscripcionYSeRepiteSinPedirNada() async throws {
+        let banco = Banco()
+        banco.activar()
+        try await banco.responder(FixturesParidad.cercanasRelativa)
+        let primera = "Ubicación lista. La estación más cercana es Estación Ejemplo Centro, a 40 metros al norte."
+        XCTAssertEqual(banco.modelo.transcripcion, [TextoGps.activando, primera], "exacto, en orden y sin añadir nada")
+        XCTAssertEqual(banco.locutor.dichos, banco.modelo.transcripcion, "lo que se oyó es lo que se lee")
+        XCTAssertEqual(banco.modelo.resultadoVoz, .hablada)
+
+        let peticiones = banco.peticiones
+        banco.modelo.repetirLoDicho()
+        XCTAssertEqual(banco.locutor.dichos.last, primera, "repite exactamente la última frase, no la indicación del servidor")
+        XCTAssertEqual(banco.locutor.dichos.count, 3)
+        XCTAssertEqual(banco.modelo.transcripcion, [TextoGps.activando, primera], "repetir no añade otra línea")
+        await dejarPasar(30)
+        XCTAssertEqual(banco.peticiones, peticiones, "sin red")
+        XCTAssertFalse(banco.modelo.consultando)
+        XCTAssertEqual(banco.modelo.repeticiones, 1)
+    }
+
+    func testRepetirIndicacionNoRecuperaLaPrimeraFraseYPorEsoExisteRepetirLoDicho() async throws {
+        let banco = Banco()
+        banco.activar()
+        try await banco.responder(FixturesParidad.cercanasRelativa)
+        banco.reloj.avanzar(GpsAuditivoModelo.intervaloMinimoMs)
+        banco.modelo.repetirIndicacion()
+        await banco.cliente.cercanas.esperar(2)
+        try await banco.responder(FixturesParidad.cercanasRelativa)
+        XCTAssertNotEqual(banco.locutor.dichos.last, banco.modelo.transcripcion.first, "la indicación del servidor es otra frase")
+        XCTAssertTrue(banco.modelo.transcripcion.contains { $0.hasPrefix("Ubicación lista.") }, "pero la primera sigue en la transcripción")
+    }
+
+    func testCadaFraseHabladaQuedaEnLaTranscripcionConSuResultado() async throws {
+        let banco = Banco()
+        banco.activar()
+        try await banco.responder(FixturesParidad.cercanasRelativa)
+        banco.reloj.avanzar(GpsAuditivoModelo.intervaloMinimoMs)
+        banco.modelo.actualizar()
+        await banco.cliente.cercanas.esperar(2)
+        try await banco.responder(FixturesParidad.cercanasRelativa)
+        banco.modelo.orientarHacia(centro)
+        banco.modelo.abrirEnMapas(centro)
+
+        XCTAssertEqual(banco.modelo.transcripcion, banco.locutor.dichos, "ninguna frase se dice sin quedar en texto")
+        XCTAssertTrue(banco.modelo.transcripcion.contains { $0.hasPrefix("Estaciones actualizadas.") })
+        XCTAssertTrue(banco.modelo.transcripcion.contains { $0.hasPrefix("Te oriento hacia") })
+        XCTAssertEqual(banco.modelo.transcripcion.last, TextoGps.abriMapas(centro), "el aviso de Mapas con su límite")
+    }
+
+    func testElPermisoNegadoQuedaEnLaTranscripcionYLaSiguienteSesionEmpiezaLimpia() {
+        let banco = Banco()
+        banco.modelo.iniciar()
+        banco.ubicacion.emitir(.permiso(.porPreguntar))
+        banco.ubicacion.emitir(.permiso(.denegado))
+        XCTAssertEqual(banco.modelo.transcripcion, [TextoGps.activando, TextoGps.permisoDenegado])
+
+        banco.modelo.iniciar() // el permiso se dio en Ajustes: nueva sesión
+        XCTAssertEqual(banco.modelo.transcripcion, [TextoGps.activando], "nada de la sesión anterior")
+    }
+
+    func testUnaFraseConOtroAvisoSonandoQuedaEnTextoYSuResultadoLoExplica() async throws {
+        let banco = Banco()
+        banco.activar()
+        try await banco.responder(FixturesParidad.cercanasRelativa)
+        banco.locutor.resultado = .ocupada
+        banco.reloj.avanzar(GpsAuditivoModelo.intervaloMinimoMs)
+        banco.modelo.actualizar()
+        await banco.cliente.cercanas.esperar(2)
+        try await banco.responder(FixturesParidad.cercanasRelativa)
+        XCTAssertTrue(banco.modelo.transcripcion.last?.hasPrefix("Estaciones actualizadas.") == true, "queda en pantalla aunque no sonó")
+        XCTAssertEqual(banco.modelo.resultadoVoz, .ocupada)
+        XCTAssertTrue(TextoGps.resultadoVoz(.ocupada).contains("suena otro aviso"))
+        XCTAssertTrue(TextoGps.resultadoVoz(.silenciada).contains("No se dijo en voz alta"))
+        XCTAssertTrue(TextoGps.resultadoVoz(.anunciada).contains("VoiceOver"))
+        XCTAssertEqual(TextoGps.resultadoVoz(.hablada), "Se dijo en voz alta.")
+    }
+
+    func testRepetirConOtroAvisoSonandoNoCortaNadaAjenoYLoDiceEnTexto() async throws {
+        let banco = Banco()
+        banco.activar()
+        try await banco.responder(FixturesParidad.cercanasRelativa)
+        let cortes = banco.locutor.cortes
+        banco.locutor.resultado = .ocupada // suena un aviso del accesorio
+        banco.modelo.repetirLoDicho()
+        XCTAssertEqual(banco.modelo.resultadoVoz, .ocupada)
+        XCTAssertEqual(banco.locutor.cortes, cortes, "repetir nunca corta una locución ajena")
+        XCTAssertEqual(banco.modelo.transcripcion.count, 2, "el texto sigue ahí")
+
+        banco.locutor.resultado = .hablada // terminó el aviso
+        banco.modelo.repetirLoDicho()
+        XCTAssertEqual(banco.modelo.resultadoVoz, .hablada)
+        XCTAssertEqual(banco.locutor.dichos.last, banco.modelo.transcripcion.last)
+    }
+
+    func testRepetirNoRearmaLaCercaniaNiCambiaLaEleccionNiElRefresco() async throws {
+        let banco = Banco()
+        try await conEstacionElegida(banco, respuesta: FixturesParidad.cercanasMuyCerca)
+        await esperarHasta("que se diga la cercanía") { self.cuantasVecesDijoCercania(banco) == 1 }
+        let peticiones = banco.peticiones
+        banco.modelo.repetirLoDicho()
+        banco.modelo.repetirLoDicho()
+        XCTAssertEqual(banco.modelo.objetivo, centroNombre)
+        XCTAssertTrue(banco.modelo.refrescoProgramado)
+        XCTAssertEqual(banco.peticiones, peticiones)
+        banco.reloj.avanzar(GpsAuditivoModelo.intervaloRefrescoMs)
+        banco.ubicacion.emitir(banco.posicion())
+        await banco.cliente.cercanas.esperar(peticiones + 1)
+        try await banco.responder(FixturesParidad.cercanasMuyCerca)
+        XCTAssertEqual(
+            banco.modelo.transcripcion.filter { $0.contains("Estás muy cerca de") }.count, 1,
+            "repetir la cercanía no la contó como nueva ni la volvió a armar")
+    }
+
+    func testSiLaUbicacionVenceAntesDeRepetirSeDiceElAvisoDeVencidaYNoLaOrientacionVieja() async throws {
+        let banco = Banco(sinTemporizador: true) // el temporizador de vencimiento no llega: lo comprueba el propio «Repetir»
+        banco.activar()
+        try await banco.responder(FixturesParidad.cercanasRelativa)
+        banco.reloj.avanzar(60_001)
+        let antes = banco.locutor.dichos.count
+        banco.modelo.repetirLoDicho()
+
+        XCTAssertEqual(banco.modelo.estado, .vencida)
+        XCTAssertEqual(banco.locutor.dichos.count, antes + 1)
+        XCTAssertEqual(banco.locutor.dichos.last, TextoGps.ubicacionVencida, "no se repite la orientación vieja")
+        XCTAssertEqual(banco.modelo.transcripcion.last, TextoGps.ubicacionVencida)
+        XCTAssertNil(banco.modelo.respuesta)
+        XCTAssertEqual(banco.peticiones, 1, "sin red")
+        banco.modelo.repetirLoDicho() // ahora lo último es el aviso: se repite tal cual
+        XCTAssertEqual(banco.locutor.dichos.last, TextoGps.ubicacionVencida)
+    }
+
+    func testDetenerYSuspenderBorranLaTranscripcionYNoQuedaNadaQueRepetir() async throws {
+        let banco = Banco()
+        banco.activar()
+        try await banco.responder(FixturesParidad.cercanasRelativa)
+        XCTAssertFalse(banco.modelo.transcripcion.isEmpty)
+        banco.modelo.suspender()
+        XCTAssertTrue(banco.modelo.transcripcion.isEmpty)
+        XCTAssertNil(banco.modelo.resultadoVoz)
+        let dichos = banco.locutor.dichos.count
+        banco.modelo.repetirLoDicho()
+        XCTAssertEqual(banco.locutor.dichos.count, dichos, "sin transcripción no se dice nada")
+
+        banco.activar()
+        try await banco.responder(FixturesParidad.cercanasRelativa)
+        banco.modelo.detener()
+        XCTAssertTrue(banco.modelo.transcripcion.isEmpty)
+    }
+
+    func testLaTranscripcionEstaAcotada() {
+        let banco = Banco()
+        for _ in 0..<(GpsAuditivoModelo.maximoTranscripcion + 10) { banco.modelo.iniciar() } // «ya está activa» no pide nada
+        XCTAssertLessThanOrEqual(banco.modelo.transcripcion.count, GpsAuditivoModelo.maximoTranscripcion)
+    }
+
+    // MARK: Antigüedad de la lectura, junto a la precisión
+
+    func testLaEdadDeLaLecturaAvanzaConElRelojYSeReiniciaConUnaLecturaNueva() async throws {
+        let banco = Banco()
+        XCTAssertNil(banco.modelo.edadLecturaMs(), "sin lectura no hay edad")
+        banco.activar()
+        XCTAssertEqual(banco.modelo.edadLecturaMs(), 0)
+        banco.reloj.avanzar(12_000)
+        XCTAssertEqual(banco.modelo.edadLecturaMs(), 12_000)
+        banco.reloj.avanzar(3_500)
+        XCTAssertEqual(banco.modelo.edadLecturaMs(), 15_500)
+
+        banco.ubicacion.emitir(banco.posicion())
+        XCTAssertEqual(banco.modelo.edadLecturaMs(), 0, "una lectura nueva reinicia la edad")
+        banco.ubicacion.emitir(banco.posicion(hace: 2_000))
+        XCTAssertEqual(banco.modelo.edadLecturaMs(), 2_000, "cuenta desde que se capturó, no desde que llegó")
+    }
+
+    func testLaEdadNuncaEsNegativaYNoExisteTrasDetenerNiVencer() async throws {
+        let banco = Banco()
+        banco.activar()
+        banco.ubicacion.emitir(banco.posicion(hace: -5_000)) // un reloj que se adelantó: edad en el futuro
+        XCTAssertEqual(banco.modelo.edadLecturaMs(), 0, "la edad se acota a cero")
+
+        banco.reloj.avanzar(65_001) // 5 s de adelanto + 60 s de vigencia
+        await esperarHasta("que venza la lectura") { banco.modelo.estado == .vencida }
+        XCTAssertNil(banco.modelo.edadLecturaMs(), "una lectura vencida no tiene edad que mostrar")
+
+        banco.ubicacion.emitir(banco.posicion())
+        XCTAssertEqual(banco.modelo.edadLecturaMs(), 0)
+        banco.modelo.detener()
+        XCTAssertNil(banco.modelo.edadLecturaMs())
+    }
+
+    func testPedirLaEdadNoHaceNingunaPeticionNiTocaElSensor() async throws {
+        let banco = Banco()
+        banco.activar()
+        try await banco.responder(FixturesParidad.cercanasRelativa)
+        let peticiones = banco.peticiones
+        let iniciados = banco.ubicacion.iniciados
+        for _ in 0..<20 {
+            banco.reloj.avanzar(1_000)
+            _ = banco.modelo.edadLecturaMs()
+        }
+        XCTAssertEqual(banco.peticiones, peticiones)
+        XCTAssertEqual(banco.ubicacion.iniciados, iniciados)
+        XCTAssertEqual(TextoGps.edad(milisegundos: 0), "Lectura de ubicación de hace menos de un segundo.")
+        XCTAssertEqual(TextoGps.edad(milisegundos: 1_000), "Lectura de ubicación de hace 1 segundo.")
+        XCTAssertEqual(TextoGps.edad(milisegundos: 12_999), "Lectura de ubicación de hace 12 segundos.")
+    }
 }

@@ -36,6 +36,8 @@ struct GpsAuditivoVista: View {
         // `.background` enseguida.
         .onDisappear { modelo.suspender() }
         .onChange(of: faseEscena) { _, nueva in if nueva == .background { modelo.suspender() } }
+        // Con «Repetir» el foco va al resultado aunque su texto sea igual al anterior.
+        .onChange(of: modelo.repeticiones) { _, _ in foco = .resultadoVoz }
         .onChange(of: modelo.fallo) { _, nuevo in
             guard let nuevo else { return }
             AccessibilityNotification.Announcement("\(nuevo.mensaje) \(nuevo.recuperacion)").post()
@@ -51,6 +53,7 @@ struct GpsAuditivoVista: View {
             .accessibilityIdentifier("gps-privacidad")
         controlDeUbicacion(modelo)
         estadoDeUbicacion(modelo)
+        appDijo(modelo)
         if modelo.estado == .activo || modelo.estado == .vencida {
             if modelo.estado == .activo { acciones(modelo) }
             resultado(modelo)
@@ -91,6 +94,15 @@ struct GpsAuditivoVista: View {
             } else {
                 Text(TextoGps.precisionDesconocida).accessibilityIdentifier("gps-precision")
             }
+            // La antigüedad junto a la precisión (EA-02 §9). `TimelineView` la vuelve a leer cada segundo mientras se ve: solo lee el
+            // reloj del modelo, sin red, sin sensor y sin otro temporizador. A los 60 s la lectura vence y la fila desaparece.
+            TimelineView(.periodic(from: .now, by: 1)) { _ in
+                if let edad = modelo.edadLecturaMs() {
+                    Text(TextoGps.edad(milisegundos: edad))
+                        .accessibilityAddTraits(.updatesFrequently)
+                        .accessibilityIdentifier("gps-edad")
+                }
+            }
         }
         if modelo.escuchando {
             switch modelo.rumbo {
@@ -98,6 +110,36 @@ struct GpsAuditivoVista: View {
             case .sinLectura: Text(TextoGps.rumboSinLectura).accessibilityIdentifier("gps-rumbo")
             case .conLectura: EmptyView()
             }
+        }
+    }
+
+    /// «La app dijo» (EA-02 §5): todo lo que esta pantalla dice por voz, en el mismo texto, con «Repetir» y cómo salió cada intento.
+    /// «Repetir» vuelve a decir la última frase tal cual, sin consulta; «Repetir indicación» (arriba) pide otra al servidor.
+    @ViewBuilder private func appDijo(_ modelo: GpsAuditivoModelo) -> some View {
+        if !modelo.transcripcion.isEmpty {
+            VStack(alignment: .leading, spacing: 8) {
+                Text(TextoGps.appDijo)
+                    .font(.headline)
+                    .accessibilityAddTraits(.isHeader)
+                    .accessibilityIdentifier("gps-app-dijo")
+                ForEach(Array(modelo.transcripcion.enumerated()), id: \.offset) { indice, frase in
+                    Text(frase)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier("gps-app-dijo-\(indice)")
+                }
+                if let resultado = modelo.resultadoVoz {
+                    Text(TextoGps.resultadoVoz(resultado))
+                        .font(.subheadline)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityFocused($foco, equals: .resultadoVoz)
+                        .accessibilityIdentifier("gps-app-dijo-resultado")
+                }
+                Button(TextoGps.repetirLoDicho) { modelo.repetirLoDicho() }
+                    .buttonStyle(EstiloBotonSecundario())
+                    .accessibilityLabel(TextoGps.repetirLoDichoEtiqueta)
+                    .accessibilityIdentifier("gps-repetir-dicho")
+            }
+            .tarjetaWeb()
         }
     }
 
@@ -194,4 +236,4 @@ struct GpsAuditivoVista: View {
 }
 
 /// Zona de foco de VoiceOver: al fallar una consulta, el foco pasa al error.
-private enum ZonaFocoGps: Hashable { case error }
+private enum ZonaFocoGps: Hashable { case error, resultadoVoz }

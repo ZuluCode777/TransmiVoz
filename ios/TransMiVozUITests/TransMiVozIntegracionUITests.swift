@@ -77,4 +77,77 @@ final class TransMiVozIntegracionUITests: XCTestCase {
         enlace.tap()
         XCTAssertTrue(elemento("favoritas-vacio").waitForExistence(timeout: 10), "se abrió la lista de favoritas")
     }
+
+    // MARK: «La app dijo» y antigüedad de la ubicación en «Mapa y GPS» (EA-02 §5 y §9)
+
+    private let frasePrimeraLectura = "Ubicación lista. La estación más cercana es Estación Ejemplo Centro, a 40 metros al norte."
+    private let fraseActivando = "Activando ubicación. Por favor acepta el permiso."
+    private let fraseVencida =
+        "Tu ubicación ya no está actualizada. Espera una lectura nueva o toca «Detener la ubicación» y vuelve a activarla."
+
+    private func activarGps(_ argumentos: [String] = ["-PRUEBAS_UI_GPS_PERMISO_CONCEDIDO"]) {
+        lanzar(argumentos)
+        abrirGpsDesdeInicio()
+        exponer("gps-activar")
+        elemento("gps-activar").tap()
+    }
+
+    /// Todo lo que la app dice queda en texto exacto, «Repetir» vuelve a decir la última frase sin consulta ni cambios, y la edad de la
+    /// lectura se ve junto a la precisión y avanza.
+    func testLaPrimeraLecturaDejaLaTranscripcionExactaSeRepiteSinConsultaYMuestraLaEdad() throws {
+        activarGps()
+        XCTAssertTrue(elemento("gps-app-dijo-1").waitForExistence(timeout: 15), "no apareció la frase de la primera lectura")
+        XCTAssertEqual(elemento("gps-app-dijo").label, "La app dijo")
+        XCTAssertEqual(elemento("gps-app-dijo-0").label, fraseActivando)
+        XCTAssertEqual(elemento("gps-app-dijo-1").label, frasePrimeraLectura, "el texto exacto que se dijo")
+        XCTAssertEqual(
+            elemento("gps-app-dijo-resultado").label,
+            "La voz de la app está apagada o no hay auriculares: se anunció con VoiceOver.",
+            "en pruebas la salida no es privada: se dice cómo salió")
+
+        XCTAssertTrue(elemento("gps-edad").waitForExistence(timeout: 10), "falta la edad de la lectura")
+        XCTAssertTrue(elemento("gps-edad").label.hasPrefix("Lectura de ubicación de hace"), elemento("gps-edad").label)
+        XCTAssertTrue(elemento("gps-precision").exists, "la edad va junto a la precisión")
+
+        exponer("gps-repetir-dicho")
+        elemento("gps-repetir-dicho").tap()
+        XCTAssertEqual(elemento("gps-app-dijo-1").label, frasePrimeraLectura, "repetir no cambia la frase")
+        XCTAssertFalse(elemento("gps-app-dijo-2").exists, "repetir no añade otra línea")
+        XCTAssertFalse(elemento("gps-consultando").exists, "repetir no pide otra consulta")
+        XCTAssertTrue(elemento("gps-estacion-0").exists)
+
+        // La edad avanza sola mientras se ve: después de al menos un segundo ya dice «hace N segundo(s)».
+        let avanzo = NSPredicate(format: "label MATCHES %@", ".*hace [1-9][0-9]* segundo.*")
+        expectation(for: avanzo, evaluatedWith: elemento("gps-edad"))
+        waitForExpectations(timeout: 10)
+    }
+
+    /// Detener borra la transcripción y la edad: no queda nada que repetir de la sesión anterior.
+    func testDetenerBorraLaTranscripcionYLaEdad() throws {
+        activarGps()
+        XCTAssertTrue(elemento("gps-app-dijo-1").waitForExistence(timeout: 15))
+        exponer("gps-detener")
+        elemento("gps-detener").tap()
+        XCTAssertTrue(elemento("gps-activar").waitForExistence(timeout: 10))
+        XCTAssertFalse(elemento("gps-app-dijo").exists, "sin sesión no hay «La app dijo»")
+        XCTAssertFalse(elemento("gps-repetir-dicho").exists)
+        XCTAssertFalse(elemento("gps-edad").exists, "sin lectura no hay edad")
+    }
+
+    /// Una lectura que está por vencer: el aviso queda en la transcripción, las estaciones viejas desaparecen y «Repetir» dice
+    /// el aviso, no la orientación vieja.
+    func testUnaUbicacionVencidaDejaElAvisoEnLaTranscripcionYRepetirNoDiceLoViejo() throws {
+        activarGps(["-PRUEBAS_UI_GPS_PERMISO_CONCEDIDO", "-PRUEBAS_UI_GPS_VENCE"])
+        let aviso = app.staticTexts.matching(
+            NSPredicate(format: "identifier BEGINSWITH %@ AND label == %@", "gps-app-dijo-", fraseVencida)).firstMatch
+        XCTAssertTrue(aviso.waitForExistence(timeout: 20), "el aviso de ubicación vencida debía quedar en «La app dijo»")
+        XCTAssertFalse(elemento("gps-estacion-0").exists, "las estaciones de una lectura vencida no se presentan")
+        XCTAssertFalse(elemento("gps-edad").exists, "una lectura vencida no tiene edad")
+        exponer("gps-repetir-dicho")
+        elemento("gps-repetir-dicho").tap()
+        XCTAssertFalse(elemento("gps-estacion-0").exists)
+        XCTAssertTrue(aviso.exists)
+        XCTAssertEqual(elemento("gps-estado").label, fraseVencida)
+    }
 }
+

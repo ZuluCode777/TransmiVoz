@@ -33,6 +33,9 @@ final class GpsAuditivoModelo {
     /// automática): para que «Estás muy cerca» pueda salir sin tocar nada. Como mucho 3 por minuto por teléfono además de las
     /// manuales, y todas bajo el mínimo de arriba: 6 por minuto en total, 18 con tres teléfonos. Propuesta de software, sin medir.
     static let intervaloRefrescoMs: Milisegundos = 20_000
+    /// Cuántas frases conserva «La app dijo». `shortcut:` tope fijo; una sesión larga con refrescos que hablan cada 20 s no la
+    /// crece sin límite, y lo más viejo ya no se puede repetir. Subirlo si hace falta ver más historia.
+    static let maximoTranscripcion = 30
 
     enum Estado: Equatable {
         case inactivo
@@ -77,6 +80,14 @@ final class GpsAuditivoModelo {
     private(set) var rumbo: EstadoRumbo = .sinLectura
     /// Lo que se dijo al abrir la ruta a pie en Mapas (también queda en pantalla); `nil` si no se abrió.
     private(set) var mensajeMapas: String?
+    /// «La app dijo» (`especificacion-accesibilidad.md` §5 y §9): TODO lo que esta pantalla dice por voz, con el mismo texto exacto,
+    /// de la sesión actual y en orden. Se borra al detener, al suspender y al empezar otra sesión. La última es la que repite
+    /// `repetirLoDicho`.
+    private(set) var transcripcion: [String] = []
+    /// Cómo salió la última frase: se dijo en voz alta, la voz de la app calló o suena otro aviso (y no se le corta). `nil` sin frases.
+    private(set) var resultadoVoz: ResultadoLocucion?
+    /// Cuántas veces se pidió «Repetir»: la pantalla lleva el foco de VoiceOver al resultado aunque el texto sea igual al anterior.
+    private(set) var repeticiones = 0
     /// Precisión de la lectura vigente, solo para mostrarla.
     private(set) var precisionMetros: Double?
     /// Dónde está la persona, solo para el mapa. Se borra al detener o al vencer.
@@ -104,6 +115,9 @@ final class GpsAuditivoModelo {
     @ObservationIgnored private var consultaInicialPendiente = true
     /// La cercanía de la estación elegida ya se dijo: una sola vez por estación elegida.
     @ObservationIgnored private var cercaniaDicha = false
+    /// La última frase fue una orientación del servidor (primera, actualizada, orientada, cercanía): depende de una lectura que puede
+    /// vencer. Las demás (activación, permiso, Mapas, aviso de vencida) valen siempre.
+    @ObservationIgnored private var ultimaEsOrientacion = false
 
     init(
         cliente: ClientePlanificador, proveedor: ProveedorUbicacion, locutor: Locutor,
@@ -145,17 +159,18 @@ final class GpsAuditivoModelo {
     func iniciar() {
         switch estado {
         case .pidiendoPermiso, .buscando, .activo:
-            locutor.decir(TextoGps.yaActiva)
+            decir(TextoGps.yaActiva)
             return
         case .vencida:
             detener()
         case .inactivo, .permisoDenegado, .permisoRestringido, .noDisponible:
             break
         }
+        limpiarTranscripcion() // una sesión nueva no arrastra lo dicho en la anterior (un permiso negado no pasa por `detener`)
         estado = .pidiendoPermiso
         aviso = nil
         proveedor.alEvento = { [weak self] evento in self?.recibir(evento) }
-        locutor.decir(TextoGps.activando)
+        decir(TextoGps.activando)
         proveedor.iniciar()
     }
 
@@ -169,6 +184,7 @@ final class GpsAuditivoModelo {
         vencimiento = nil
         cancelarRefresco()
         locutor.cortarLoPropio()
+        limpiarTranscripcion()
         posicion = nil
         rumboMedido = nil
         posicionEnMapa = nil
@@ -245,7 +261,7 @@ final class GpsAuditivoModelo {
         mensajeMapas = nil
         estado = nuevo
         aviso = texto
-        locutor.decir(texto)
+        decir(texto)
     }
 
     private func aplicar(_ medida: PosicionMedida) {
@@ -302,7 +318,7 @@ final class GpsAuditivoModelo {
         limpiarConsulta()
         estado = .vencida
         aviso = TextoGps.ubicacionVencida
-        locutor.decir(TextoGps.ubicacionVencida)
+        decir(TextoGps.ubicacionVencida)
     }
 
     // MARK: Acciones de la persona
@@ -326,7 +342,7 @@ final class GpsAuditivoModelo {
         abridor.abrirRutaAPie(haciaEstacion: estacion.nombre, en: estacion.coordenada)
         let texto = TextoGps.abriMapas(estacion.nombre)
         mensajeMapas = texto
-        locutor.decir(texto)
+        decir(texto)
     }
 
     // MARK: Refresco automático de la estación elegida
@@ -369,7 +385,7 @@ final class GpsAuditivoModelo {
     /// Una respuesta reciente se vuelve a decir sin pedir otra; si no, se consulta. «Actualizar» siempre consulta.
     private func pedir(_ accion: Accion) {
         guard estado == .activo else {
-            if estado == .vencida { aviso = TextoGps.ubicacionVencida; locutor.decir(TextoGps.ubicacionVencida) }
+            if estado == .vencida { aviso = TextoGps.ubicacionVencida; decir(TextoGps.ubicacionVencida) }
             return
         }
         if consultando {
@@ -445,6 +461,50 @@ final class GpsAuditivoModelo {
             latitud: posicion.latitud, longitud: posicion.longitud, precision: precision, edadMs: Int(max(0, edad)), rumbo: rumboEnviado)
     }
 
+    // MARK: «La app dijo»
+
+    /// «Repetir» de «La app dijo»: vuelve a decir EXACTAMENTE la última frase, sin consulta ni red. No toca la cercanía ya dicha, la
+    /// estación elegida ni el refresco, y la voz sigue sus reglas (ruta privada, voz permitida) sin cortar jamás una locución ajena:
+    /// si no suena, `resultadoVoz` lo explica y el texto sigue en pantalla. Una orientación que dependía de una lectura que ya
+    /// venció no se repite: se dice el aviso de ubicación vencida en su lugar.
+    func repetirLoDicho() {
+        guard let frase = transcripcion.last else { return }
+        repeticiones += 1
+        if ultimaEsOrientacion, estado == .activo, (msHastaVencer() ?? -1) < 0 {
+            vencer() // el temporizador aún no llegó: lo comprueba el propio «Repetir»
+            return
+        }
+        resultadoVoz = locutor.decir(frase)
+    }
+
+    /// Cuánto hace que se capturó la lectura vigente, para mostrarlo junto a la precisión. Sale del reloj monotónico (el mismo del
+    /// vencimiento): nunca es negativa y no existe sin lectura vigente (tras detener o vencer). Solo lee: no pide red ni toca el sensor.
+    func edadLecturaMs() -> Milisegundos? {
+        guard let posicion else { return nil }
+        let edad = max(0, reloj() - posicion.capturadaMs)
+        return edad <= Self.edadMaximaPosicionMs ? edad : nil
+    }
+
+    /// El ÚNICO camino de la voz de esta pantalla: dice la frase por el locutor compartido y anota en «La app dijo» el texto exacto y
+    /// cómo salió. Así nada se dice sin quedar en texto, aunque no se haya oído (otro aviso sonando, voz apagada).
+    @discardableResult
+    private func decir(_ texto: String, orientacion: Bool = false) -> ResultadoLocucion {
+        let resultado = locutor.decir(texto)
+        transcripcion.append(texto)
+        if transcripcion.count > Self.maximoTranscripcion {
+            transcripcion.removeFirst(transcripcion.count - Self.maximoTranscripcion)
+        }
+        resultadoVoz = resultado
+        ultimaEsOrientacion = orientacion
+        return resultado
+    }
+
+    private func limpiarTranscripcion() {
+        transcripcion = []
+        resultadoVoz = nil
+        ultimaEsOrientacion = false
+    }
+
     // MARK: Voz
 
     /// Dice lo que el servidor devolvió. Una sola frase por vez (la voz es de cola de uno): la orientación y, si el servidor
@@ -476,7 +536,7 @@ final class GpsAuditivoModelo {
             frases.append(TextoGps.muyCerca(elegida))
         }
         guard !frases.isEmpty else { return }
-        let resultado = locutor.decir(frases.joined(separator: " "))
+        let resultado = decir(frases.joined(separator: " "), orientacion: true)
         if diceLaCercania && resultado.seDijo { cercaniaDicha = true }
         if resultado == .ocupada && accion != .automatica { aviso = TextoGps.vozOcupada }
     }

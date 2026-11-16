@@ -1,3 +1,4 @@
+import ContratoBLE
 import Foundation
 
 /// Textos de la pantalla «Mapa y GPS». Los de orientación (distancia hablada, referencia cardinal, giro, frase) los escribe
@@ -9,6 +10,11 @@ enum TextoGps {
     static let activar = "Activar mi ubicación"
     static let detener = "Detener la ubicación"
     static let repetir = "Repetir indicación"
+    /// «La app dijo» (EA-02 §5): todo lo que esta pantalla dice por voz, en texto, con su «Repetir». Distinto de «Repetir
+    /// indicación», que pide otra consulta y dice la dirección del servidor.
+    static let appDijo = "La app dijo"
+    static let repetirLoDicho = "Repetir"
+    static let repetirLoDichoEtiqueta = "Repetir lo que dijo la app"
     static let actualizar = "Actualizar estaciones"
     static let orientarme = "Oriéntame por voz"
     static let abrirAjustes = "Abrir Ajustes"
@@ -22,7 +28,7 @@ enum TextoGps {
     /// Qué hace la pantalla con la ubicación, dicho antes de pedir el permiso del sistema. Es cierto y completo: lo que se
     /// envía, a quién y qué no se hace.
     static let privacidad =
-        "Uso tu ubicación solo mientras esta pantalla está abierta y tú la activas. Envío tu ubicación al servidor de TransMiVoz para ordenar las estaciones y calcular distancias, orientación y cercanía aproximadas; no la guardo ni la registro, y no la sigo en segundo plano. Al salir de la pantalla o bloquear el iPhone, se detiene."
+        "Uso tu ubicación solo mientras esta pantalla está abierta y tú la activas. Envío al servidor de TransMiVoz tu ubicación, qué tan precisa es, cuánto hace que se midió y, si tu iPhone tiene brújula, hacia dónde apunta, para ordenar las estaciones y calcular distancias, orientación y cercanía aproximadas; no la guardo ni la registro, ni a ella ni a esos datos, y no la sigo en segundo plano. Al salir de la pantalla o bloquear el iPhone, se detiene."
 
     static let activando = "Activando ubicación. Por favor acepta el permiso."
     static let yaActiva = "La ubicación ya está activa."
@@ -90,4 +96,25 @@ enum TextoGps {
     }
 
     static let precisionDesconocida = "Tu ubicación no informa su precisión."
+
+    /// Antigüedad de la lectura vigente, junto a la precisión. Nunca pasa de 59 s: a los 60 s la lectura vence y no se muestra.
+    static func edad(milisegundos: Milisegundos) -> String {
+        let segundos = Int(milisegundos / 1_000)
+        guard segundos >= 1 else { return "Lectura de ubicación de hace menos de un segundo." }
+        return "Lectura de ubicación de hace \(segundos) \(segundos == 1 ? "segundo" : "segundos")."
+    }
+
+    /// Cómo salió la última frase de «La app dijo»: si se oyó o por qué no. El texto está en pantalla en todos los casos.
+    static func resultadoVoz(_ resultado: ResultadoLocucion) -> String {
+        switch resultado {
+        case .hablada:
+            return "Se dijo en voz alta."
+        case .anunciada:
+            return "La voz de la app está apagada o no hay auriculares: se anunció con VoiceOver."
+        case .ocupada:
+            return "No se dijo en voz alta: suena otro aviso de la app y no se le corta. Pulsa Repetir cuando termine."
+        case .silenciada:
+            return "No se dijo en voz alta: la voz de la app está apagada o no hay una salida de audio privada. El texto está aquí."
+        }
+    }
 }
