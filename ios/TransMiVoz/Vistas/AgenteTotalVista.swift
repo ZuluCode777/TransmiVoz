@@ -8,9 +8,11 @@ import SwiftUI
 /// al dejarla se corta la voz de la respuesta que abrió una pantalla (`AgenteTotalModelo.alSalirDeInicio`).
 struct AgenteTotalVista: View {
     let consulta: ConsultaModelo
+    /// Rutas, favoritas, viaje y «Mapa y GPS»: las pantallas a las que lleva el asistente, con las mismas dependencias que Inicio.
+    let servicios: ServiciosRutas
     let inicioVisible: Bool
 
     var body: some View {
-        AgenteTotalContenido(consulta: consulta, inicioVisible: inicioVisible)
+        AgenteTotalContenido(consulta: consulta, servicios: servicios, inicioVisible: inicioVisible)
     }
 }

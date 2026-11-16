@@ -7,7 +7,7 @@ import SwiftUI
 /// pila con `navigationDestination(item:)`, sin pasar por `InicioVista`.
 struct AgenteTotalContenido: View {
     @State private var agente: AgenteTotalModelo
-    @Environment(\.serviciosRutas) private var servicios
+    let servicios: ServiciosRutas
     @Environment(\.scenePhase) private var faseEscena
     @Environment(\.openURL) private var abrirURL
     @FocusState private var campoEnfocado: Bool
@@ -16,7 +16,8 @@ struct AgenteTotalContenido: View {
     /// `onDisappear` ya no avisa (esta pantalla estaba cubierta desde antes).
     let inicioVisible: Bool
 
-    init(consulta: ConsultaModelo, inicioVisible: Bool) {
+    init(consulta: ConsultaModelo, servicios: ServiciosRutas, inicioVisible: Bool) {
+        self.servicios = servicios
         self.inicioVisible = inicioVisible
         _agente = State(initialValue: AgenteTotalModelo(consulta: consulta, avisos: .sistema))
     }
@@ -268,27 +269,11 @@ struct AgenteTotalContenido: View {
 
     @ViewBuilder private func pantalla(_ destino: DestinoAgenteTotal) -> some View {
         switch destino {
-        case .gps:
-            GpsAuditivoVista()
-        case .favoritas:
-            if let servicios { FavoritasVista(modelo: servicios.favoritas) } else { SinServiciosVista() }
-        case .rutas(let estacion):
-            if let servicios { RutasVista(servicios: servicios, consultaInicial: estacion) } else { SinServiciosVista() }
-        case .ruta(let codigo):
-            if let servicios { DetalleRutaVista(servicios: servicios, codigo: codigo) } else { SinServiciosVista() }
-        case .viaje:
-            if let servicios { ViajeVista(servicios: servicios) } else { SinServiciosVista() }
+        case .gps: GpsAuditivoVista(servicios: servicios)
+        case .favoritas: FavoritasVista(modelo: servicios.favoritas)
+        case .rutas(let estacion): RutasVista(servicios: servicios, consultaInicial: estacion)
+        case .ruta(let codigo): DetalleRutaVista(servicios: servicios, codigo: codigo)
+        case .viaje: ViajeVista(servicios: servicios)
         }
-    }
-}
-
-/// Sin los servicios de rutas en el entorno (solo en vistas previas): lo dice y no abre nada.
-private struct SinServiciosVista: View {
-    var body: some View {
-        Text("Esta pantalla no está disponible ahora.")
-            .font(.jakarta(.bold, .lg))
-            .tarjetaWeb()
-            .padding(16)
-            .accessibilityIdentifier("agente-total-sin-servicios")
     }
 }

@@ -56,8 +56,21 @@ final class EntornoApp {
         #endif
         // El dictado es el de la consulta y la voz la de los avisos, que en cada fábrica es la misma de la app: «Buscar hablando» y
         // «Escuchar» no abren un segundo reconocedor ni un segundo dueño del audio.
+        // «Mapa y GPS» habla por la misma voz y manda la lectura por el mismo cliente del planificador.
+        let gps = GpsAuditivoModelo(
+            cliente: planificador, proveedor: Self.proveedorDeUbicacion(modoPruebas: modoPruebas),
+            locutor: LocutorControlVoz(voz: avisos.voz))
         serviciosRutas = ServiciosRutas(
-            cliente: planificador, favoritas: favoritas, modoPruebas: modoPruebas, dictado: consulta.dictado, voz: avisos.voz)
+            cliente: planificador, favoritas: favoritas, modoPruebas: modoPruebas, dictado: consulta.dictado, voz: avisos.voz,
+            gps: gps)
+    }
+
+    /// CoreLocation «al usar la app»; en las pruebas de interfaz, la ubicación sintética rotulada (sin GPS ni aviso del sistema).
+    private static func proveedorDeUbicacion(modoPruebas: Bool) -> ProveedorUbicacion {
+        #if DEBUG
+        if modoPruebas { return UbicacionSintetica(argumentos: ProcessInfo.processInfo.arguments) }
+        #endif
+        return UbicacionCoreLocation()
     }
 
     /// `UserDefaults` normales, o en las pruebas de interfaz una suite que se vacía en cada arranque: ningún modo elegido en una

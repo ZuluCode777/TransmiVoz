@@ -7,15 +7,10 @@ import SwiftUI
 /// planificador de TransMilenio. El catálogo lo pide al servidor (`metro-linea-1`) y se muestra tal cual, con el rótulo y la
 /// atribución (licencia, fecha, cambios) junto al mapa. El listado de las 16 estaciones es completo y no depende del mapa.
 struct MetroVista: View {
-    @Environment(\.serviciosRutas) private var servicios
+    let servicios: ServiciosRutas
 
     var body: some View {
-        if let servicios {
-            MetroPantalla(servicios: servicios)
-        } else {
-            // Sin servicios no hay cliente: solo pasa fuera de la app (vistas previas).
-            Text(TextoMetro.servidorNoConfigurado).padding(16)
-        }
+        MetroPantalla(servicios: servicios)
     }
 }
 

@@ -58,8 +58,8 @@ private extension EstadoCarga {
     }
 }
 
-/// Lo que el iPhone necesita para las pantallas de rutas: el cliente del planificador, las favoritas y si corre en
-/// las pruebas de interfaz (donde el mapa no se dibuja).
+/// Lo que el iPhone necesita para las pantallas de rutas, de Metro y de «Mapa y GPS»: el cliente del planificador, las favoritas
+/// y si corre en las pruebas de interfaz (donde el mapa no se dibuja).
 struct ServiciosRutas {
     let cliente: ClientePlanificador
     let favoritas: FavoritasModelo
@@ -70,6 +70,9 @@ struct ServiciosRutas {
     let dictado: DictadoModelo?
     /// La `ControlVoz` de la app (la misma de la consulta, los avisos y el accesorio: un solo dueño del audio) para «Escuchar».
     let voz: ControlVoz
+    /// «Mapa y GPS»: un solo modelo para toda la app, así la raíz suelta la ubicación al cambiar de pestaña o pasar a segundo plano
+    /// sea cual sea la pantalla que la abrió (Inicio, el asistente de voz o una respuesta de Consulta).
+    let gps: GpsAuditivoModelo
 }
 
 /// Búsqueda de rutas por código o estación.

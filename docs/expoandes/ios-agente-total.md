@@ -33,12 +33,12 @@ Esta pantalla siempre pregunta por el transporte de hoy (`escenario = .transport
 - `Estado/ConsultaModelo.swift` (cambio pequeño): `decir(_:)` (voz de la app con las guardas de la respuesta hablada), `callar()` y `lecturaAutomatica` (la pantalla de voz la apaga mientras está a la vista para no leer dos veces una respuesta dictada).
 - `Vistas/ConsultaVista.swift` (cambios mínimos, sin rediseño): las respuestas pedidas desde el asistente no las anuncia la pestaña Consulta (`visible`), y los botones del sistema (`.bordered`, `.borderedProminent`), que fallaban la auditoría de contraste de la CI (`boton-escenario`, «Enviar», «Reintentar», los del dictado), pasan a `EstiloBotonPildora`, `EstiloBotonPrimario` y `EstiloBotonSecundario` de la base.
 
-## Dependencias de integración (lo que no es de este PR)
+## Integración (hecha en `integracion/feria-13-11`)
 
-1. **`InicioVista.swift`**: `case .total: AgenteTotalVista()` → `case .total: AgenteTotalVista(consulta: entorno.consulta)`. Mientras no se haga, la pantalla es el marcador provisional de la base y las pruebas de interfaz nuevas **se saltan** con ese motivo. Al hacerlo, borrar `AgenteTotalVista.textoProvisional`, su rama y el `nil` por defecto: esa línea no debe llegar a `main`.
-2. **`TransMiVozUITests.swift:2298`** (`testElMenuDeModoCambiaElInicioYSeCierra`): espera `provisional-agente-total`. Tras el punto 1 debe esperar `agente-total-microfono`.
-3. **Firmas que usa el asistente**: `GpsAuditivoVista()` (sin argumentos; la tarea de Mapa y GPS la reemplaza), `FavoritasVista(modelo:)`, `RutasVista(servicios:consultaInicial:)`, `DetalleRutaVista(servicios:codigo:)` y `ViajeVista(servicios:)`. Si una tarea las cambia, `AgenteTotalContenido.pantalla(_:)` es el único sitio que hay que ajustar.
-4. **`AccionAgente.limite`** (`Dominio/PresentacionRespuesta.swift`): dice que la app no tiene «rutas frecuentes» ni GPS auditivo. El asistente no lo dice cuando abre la pantalla, pero la pestaña Consulta sí (y `testAccionSinPantallaInformaElLimiteYNoNavega` lo exige). Cuando Mapa y GPS exista de verdad, ese texto es falso: decisión del dueño, fuera de este PR.
+1. `InicioVista` construye `AgenteTotalVista(consulta: entorno.consulta, servicios: entorno.serviciosRutas, inicioVisible:)`: la misma consulta, dictado y voz que Consulta, y las mismas dependencias de rutas y de «Mapa y GPS» que Inicio. Ya no hay marcador provisional ni `nil` por defecto; `testElMenuDeModoCambiaElInicioYSeCierra` espera `agente-total-microfono` y las pruebas de interfaz de esta pantalla se ejecutan (no se omiten).
+2. **Destinos reales** (`AgenteTotalContenido.pantalla(_:)`): `GpsAuditivoVista(servicios:)`, `FavoritasVista(modelo:)`, `RutasVista(servicios:consultaInicial:)`, `DetalleRutaVista(servicios:codigo:)` y `ViajeVista(servicios:)`, todos con los servicios explícitos (sin entorno ni «pantalla no disponible»).
+3. **Ubicación**: «Mapa y GPS» tiene un solo modelo (`ServiciosRutas.gps`). La raíz lo suelta al cambiar de pestaña y al pasar a segundo plano (`RaizVista`), también cuando la pantalla la abrió este asistente.
+4. **`AccionAgente.limite`** (`Dominio/PresentacionRespuesta.swift`): ya no dice que falten las rutas frecuentes ni el GPS. Consulta no navega sola, y el límite manda al botón que abre cada pantalla («Ver mis rutas frecuentes», «Abrir Mapa y GPS», «Ver las rutas que pasan por la estación»); este asistente sí las abre y no lo lee.
 
 ## Decisiones y límites abiertos
 

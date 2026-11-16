@@ -405,8 +405,9 @@ private struct RespuestaVista: View {
         }
     }
 
-    /// Lo que la web abre con esta acción y el iPhone también tiene (EA-25): el detalle de una ruta con su mapa, y las
-    /// rutas que pasan por una estación. Sin servicios de rutas en el entorno no se ofrece nada.
+    /// Lo que la web abre con esta acción y el iPhone también tiene: el detalle de una ruta con su mapa, las rutas que pasan por
+    /// una estación, las rutas frecuentes y «Mapa y GPS» (que solo pide la ubicación cuando la persona la activa allí). Ninguna
+    /// navega sola. Sin servicios de rutas en el entorno (solo en vistas previas) no se ofrece nada.
     private struct EnlaceDeAccion: View {
         let accion: AccionAgente
         @Environment(\.serviciosRutas) private var servicios
@@ -432,7 +433,25 @@ private struct RespuestaVista: View {
                     }
                     .buttonStyle(EstiloBotonSecundario())
                     .accessibilityIdentifier("enlace-rutas-estacion")
-                case .ninguna, .frecuentes, .gps, .viaje:
+                case .frecuentes:
+                    NavigationLink {
+                        FavoritasVista(modelo: servicios.favoritas)
+                    } label: {
+                        Label("Ver mis rutas frecuentes", systemImage: "heart")
+                            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                    }
+                    .buttonStyle(EstiloBotonSecundario())
+                    .accessibilityIdentifier("enlace-rutas-frecuentes-consulta")
+                case .gps:
+                    NavigationLink {
+                        GpsAuditivoVista(servicios: servicios)
+                    } label: {
+                        Label("Abrir Mapa y GPS", systemImage: "map")
+                            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                    }
+                    .buttonStyle(EstiloBotonSecundario())
+                    .accessibilityIdentifier("enlace-gps")
+                case .ninguna, .viaje:
                     EmptyView()
                 }
             }

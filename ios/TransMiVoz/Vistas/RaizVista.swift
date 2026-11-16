@@ -48,7 +48,15 @@ struct RaizVista: View {
             MenuModoVista(modo: entorno.modo.modo, alElegir: elegirModo, alCerrar: { menuModoAbierto = false })
         }
         // Solo en primer plano y activa: inactiva (bloqueo, centro de control) o en segundo plano se suspende.
-        .onChange(of: faseEscena) { _, nueva in entorno.accesorio?.escenaActiva(nueva == .active) }
+        .onChange(of: faseEscena) { _, nueva in
+            entorno.accesorio?.escenaActiva(nueva == .active)
+            // La ubicación no corre en segundo plano ni se reanuda sola. `.inactive` no la suelta: el aviso de permiso del
+            // sistema deja la app inactiva un momento.
+            if nueva == .background { entorno.serviciosRutas.gps.suspender() }
+        }
+        // «Mapa y GPS» queda empujada en la pila de la pestaña que la abrió: cambiar de pestaña la suelta sin esperar a que
+        // el sistema avise a una pantalla ya cubierta. No se reanuda sola al volver.
+        .onChange(of: pestana) { _, _ in entorno.serviciosRutas.gps.suspender() }
         // Red caída y datos viejos nacen del resultado de la consulta; la consulta no sabe de avisos.
         .onChange(of: entorno.consulta.estado) { _, nuevo in entorno.avisos.consultaCambio(nuevo) }
     }

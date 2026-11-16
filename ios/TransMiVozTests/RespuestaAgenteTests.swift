@@ -128,6 +128,13 @@ final class RespuestaAgenteTests: XCTestCase {
         }
         // Sin ubicación, el origen se escribe.
         XCTAssertTrue(AccionAgente.gps.limite?.contains("desde qué estación sales") ?? false)
+        // Las pantallas existen: el límite manda al botón que las abre y no dice que falten ni que la app no use ubicación.
+        for accion: AccionAgente in [.frecuentes, .gps, .busqueda(estacion: "A")] {
+            let limite = accion.limite ?? ""
+            XCTAssertTrue(limite.contains("toca «"), "\(accion): dice qué botón abre la pantalla")
+            XCTAssertFalse(limite.contains("todavía no tiene") || limite.contains("no usa tu ubicación"), "\(accion)")
+        }
+        XCTAssertTrue(AccionAgente.gps.limite?.contains("Solo usa tu ubicación si la activas allí") ?? false)
     }
 
     func testTextoDesmedidoSeRechaza() {

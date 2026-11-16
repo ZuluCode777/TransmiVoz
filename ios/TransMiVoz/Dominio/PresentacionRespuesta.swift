@@ -1,19 +1,21 @@
 import Foundation
 
 extension AccionAgente {
-    /// Límite de esta app ante la acción: la web abre una pantalla que el iPhone todavía no tiene. La app
-    /// no navega sola; lo dice y deja el texto del servidor. `nil` si la acción no abre nada o si el iPhone
-    /// tiene la misma pantalla (la ruta ofrece su detalle con el mapa, EA-25).
+    /// Límite de esta app ante la acción. Las pantallas que la web abre con `frequent`, `gps` y `search` existen en el iPhone
+    /// (rutas frecuentes, «Mapa y GPS» y las rutas de la estación), pero Consulta no navega sola: ofrece el botón y el límite
+    /// lo dice, para que lo que se lee («Voy a abrir…») no prometa lo que no ocurre. El asistente de voz de Ceguera total sí las
+    /// abre y no lee este texto. `nil` si la acción no abre nada o si el iPhone ya ofrece su pantalla sin promesa
+    /// previa (la ruta ofrece su detalle con el mapa, EA-25).
     var limite: String? {
         switch self {
         case .ninguna:
             return nil
         case .frecuentes:
-            return "Esta app todavía no tiene la pantalla de rutas frecuentes: no se abre ninguna lista. Puedes preguntar por una ruta con su código."
+            return "Esta app no abre sola la lista de rutas frecuentes: toca «Ver mis rutas frecuentes» para verla."
         case .gps:
-            return "Esta app no usa tu ubicación ni tiene GPS auditivo: no se abre ninguna guía. Para un viaje, escribe desde qué estación sales y a cuál vas."
+            return "Esta app no abre sola «Mapa y GPS»: toca «Abrir Mapa y GPS». Solo usa tu ubicación si la activas allí. Para un viaje, escribe desde qué estación sales y a cuál vas."
         case .busqueda:
-            return "Esta app no tiene una pantalla propia de la estación."
+            return "Esta app no abre sola las rutas de la estación: toca «Ver las rutas que pasan por la estación»."
         case .ruta:
             return nil
         case .viaje:
@@ -35,7 +37,7 @@ extension RespuestaAgente {
 extension RespuestaAgente {
     /// Lo que se lee en voz alta: lo mismo que la pantalla presenta como respuesta, sin los pasos. Un viaje no lee el texto
     /// del servidor (la pantalla tampoco lo muestra: puede traer órdenes de abordaje sin verificar) sino el aviso de la app.
-    /// El límite de la acción se lee siempre que lo hay: «Voy a abrir el GPS auditivo» sin él prometería lo que esta app no hace.
+    /// El límite de la acción se lee siempre que lo hay: «Voy a abrir el GPS auditivo» sin él prometería una navegación que Consulta no hace.
     var textoHablado: String {
         var partes: [String] = []
         if case .viaje = accion {} else { partes.append(texto) }

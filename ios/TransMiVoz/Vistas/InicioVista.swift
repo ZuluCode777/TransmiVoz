@@ -43,7 +43,8 @@ struct InicioVista: View {
     @ViewBuilder private var contenido: some View {
         switch entorno.modo.modo {
         case .parcial: baldosas
-        case .total: AgenteTotalVista(consulta: entorno.consulta, inicioVisible: pestana == .inicio)
+        case .total:
+            AgenteTotalVista(consulta: entorno.consulta, servicios: entorno.serviciosRutas, inicioVisible: pestana == .inicio)
         }
     }
 
@@ -94,8 +95,8 @@ struct InicioVista: View {
         switch destino {
         case .rutas: RutasVista(servicios: entorno.serviciosRutas)
         case .lupa: LupaVista(modelo: entorno.lupa, avisoSintetico: entorno.modoPruebas)
-        case .gps: GpsAuditivoVista()
-        case .metro: MetroVista()
+        case .gps: GpsAuditivoVista(servicios: entorno.serviciosRutas)
+        case .metro: MetroVista(servicios: entorno.serviciosRutas)
         case .emergencia: EmergenciaVista(voz: entorno.avisos.voz)
         }
     }

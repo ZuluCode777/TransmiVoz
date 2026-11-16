@@ -617,14 +617,19 @@ final class TransMiVozUITests: XCTestCase {
         XCTAssertFalse(elemento("aviso-catalogo-antiguo").exists, "con datos recientes el aviso desaparece")
     }
 
-    func testAccionSinPantallaInformaElLimiteYNoNavega() throws {
+    func testAccionGpsInformaElLimiteOfreceLaPantallaYNoNavegaSola() throws {
         preguntar("gps")
         esperarTexto("[SIMULADO] Voy a abrir el GPS auditivo.")
         let limite = elemento("limite-accion")
         XCTAssertTrue(limite.exists, "falta el límite de la acción")
-        XCTAssertTrue(limite.label.contains("no usa tu ubicación"))
-        XCTAssertTrue(limite.label.contains("desde qué estación sales"), "sin ubicación, el origen se escribe")
-        XCTAssertTrue(app.tabBars.buttons["Consulta"].isSelected, "la app no navega a ninguna pantalla")
+        XCTAssertTrue(limite.label.contains("no abre sola"), "dice que Consulta no navega sola")
+        XCTAssertTrue(limite.label.contains("Solo usa tu ubicación si la activas allí"), "dice cuándo se usa la ubicación")
+        XCTAssertTrue(app.tabBars.buttons["Consulta"].isSelected, "la app no navega sola")
+        let enlace = elemento("enlace-gps")
+        XCTAssertTrue(enlace.waitForExistence(timeout: 5), "falta el botón que abre «Mapa y GPS»")
+        enlace.tap()
+        XCTAssertTrue(app.navigationBars["Mapa y GPS"].waitForExistence(timeout: 10), "el botón no abrió «Mapa y GPS»")
+        XCTAssertTrue(elemento("gps-activar").waitForExistence(timeout: 10), "nada se pide al abrir: la persona activa la ubicación")
     }
 
     // MARK: Servidor

@@ -8,70 +8,38 @@ import SwiftUI
 /// la distancia y orienta: aquí no hay ninguna regla de transporte. Cada estación se lee en el listado (el mapa es una ayuda
 /// visual) y la voz es la de `ControlVoz`, la misma de los avisos del accesorio.
 ///
-/// `voz`: la `ControlVoz` de la app. Sin ella, lo hablado se anuncia con VoiceOver y queda en pantalla.
+/// El modelo es el de `ServiciosRutas.gps`, uno para toda la app: su voz es la `ControlVoz` compartida y la raíz suelta la ubicación
+/// al cambiar de pestaña o pasar a segundo plano, sea cual sea la pantalla que la abrió.
 struct GpsAuditivoVista: View {
-    @Environment(\.serviciosRutas) private var servicios
-    let voz: ControlVoz?
-
-    init(voz: ControlVoz? = nil) {
-        self.voz = voz
-    }
-
-    var body: some View {
-        if let servicios {
-            GpsAuditivoPantalla(servicios: servicios, voz: voz)
-        } else {
-            // Sin servicios no hay cliente: solo pasa fuera de la app (vistas previas).
-            Text(TextoMetro.servidorNoConfigurado).padding(16)
-        }
-    }
-}
-
-private struct GpsAuditivoPantalla: View {
     let servicios: ServiciosRutas
-    let voz: ControlVoz?
 
-    @State private var modelo: GpsAuditivoModelo?
     @Environment(\.scenePhase) private var faseEscena
     @Environment(\.openURL) private var abrirURL
     @AccessibilityFocusState private var foco: ZonaFocoGps?
+
+    private var modelo: GpsAuditivoModelo { servicios.gps }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 EncabezadoPantalla(titulo: TextoGps.titulo, subtitulo: TextoGps.subtitulo, simbolo: "map")
-                if let modelo { contenido(modelo) }
+                contenido(modelo)
             }
             .padding(16)
         }
         .navigationTitle(TextoGps.titulo)
         .navigationBarTitleDisplayMode(.inline)
         .bordeInferiorLegible()
-        .onAppear { if modelo == nil { modelo = crearModelo() } }
         // La ubicación solo está abierta con la pantalla a la vista y la app en primer plano; no se reanuda sola. `.inactive`
         // no la suelta: el aviso de permiso del sistema deja la app inactiva un momento, y bloquear el iPhone pasa a
         // `.background` enseguida.
-        .onDisappear { modelo?.suspender() }
-        .onChange(of: faseEscena) { _, nueva in if nueva == .background { modelo?.suspender() } }
-        .onChange(of: modelo?.fallo) { _, nuevo in
+        .onDisappear { modelo.suspender() }
+        .onChange(of: faseEscena) { _, nueva in if nueva == .background { modelo.suspender() } }
+        .onChange(of: modelo.fallo) { _, nuevo in
             guard let nuevo else { return }
             AccessibilityNotification.Announcement("\(nuevo.mensaje) \(nuevo.recuperacion)").post()
             foco = .error
         }
-    }
-
-    private func crearModelo() -> GpsAuditivoModelo {
-        let proveedor: ProveedorUbicacion
-        #if DEBUG
-        if servicios.modoPruebas {
-            proveedor = UbicacionSintetica(argumentos: ProcessInfo.processInfo.arguments)
-        } else {
-            proveedor = UbicacionCoreLocation()
-        }
-        #else
-        proveedor = UbicacionCoreLocation()
-        #endif
-        return GpsAuditivoModelo(cliente: servicios.cliente, proveedor: proveedor, locutor: LocutorControlVoz(voz: voz))
     }
 
     // MARK: Contenido
