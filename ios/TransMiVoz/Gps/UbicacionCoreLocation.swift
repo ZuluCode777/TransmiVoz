@@ -30,8 +30,8 @@ final class UbicacionCoreLocation: NSObject, ProveedorUbicacion, CLLocationManag
         // Una lectura nueva por cada ~5 grados: el rumbo se guarda, no se envía.
         gestor.headingFilter = 5
         gestor.headingOrientation = .portrait
-        gestor.activityType = .fitness
-        gestor.pausesLocationUpdatesAutomatically = true
+        // Sin pausa automática: con la persona quieta el sistema dejaría de entregar lecturas y la pantalla diría «vencida» sin motivo.
+        gestor.pausesLocationUpdatesAutomatically = false
     }
 
     func iniciar() {
