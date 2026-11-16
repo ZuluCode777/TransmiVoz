@@ -179,9 +179,16 @@ private struct TramoCandidato: Decodable {
     let codigoRuta: String
 }
 
+/// Otra ruta directa que también sirve al viaje: en el contrato solo trae el código, sin paradas ni trazado.
+private struct AlternativaViaje: Decodable {
+    let codigoRuta: String
+}
+
 struct PlanViaje: Equatable, Sendable {
     /// Un viaje tiene como mucho un transbordo.
     static let maximoTramos = 2
+    /// `MAX_ALTERNATIVAS` del servidor: los planes que pide (3) menos el mejor.
+    static let maximoAlternativas = 2
 
     let origen: String
     let destino: String
@@ -191,11 +198,16 @@ struct PlanViaje: Equatable, Sendable {
     /// Códigos de las rutas de un servicio `candidato`. Sin paradas ni mapa: la operación no está confirmada.
     let codigosCandidatos: [String]
     let rutasPorElTrazado: [ResumenRuta]
+    /// Códigos de las otras rutas directas que también sirven al viaje («También te sirven…» de la web). Solo un viaje
+    /// `operativo` de un tramo las trae, y solo si las hay: vacío en cualquier otro caso. Sin paradas: la otra ruta puede
+    /// abordarse en otra estación del mismo lugar y el servidor no lo garantiza.
+    let alternativas: [String]
     let catalogo: ProcedenciaCatalogo
 
     init(
         origen: String, destino: String, resultado: ResultadoViaje, tramos: [TramoPlan] = [],
-        codigosCandidatos: [String] = [], rutasPorElTrazado: [ResumenRuta] = [], catalogo: ProcedenciaCatalogo
+        codigosCandidatos: [String] = [], rutasPorElTrazado: [ResumenRuta] = [], alternativas: [String] = [],
+        catalogo: ProcedenciaCatalogo
     ) {
         self.origen = origen
         self.destino = destino
@@ -203,6 +215,7 @@ struct PlanViaje: Equatable, Sendable {
         self.tramos = tramos
         self.codigosCandidatos = codigosCandidatos
         self.rutasPorElTrazado = rutasPorElTrazado
+        self.alternativas = alternativas
         self.catalogo = catalogo
     }
 
@@ -210,7 +223,9 @@ struct PlanViaje: Equatable, Sendable {
         guard origen.tieneTexto, destino.tieneTexto, catalogo.esValida, tramos.count <= Self.maximoTramos,
               codigosCandidatos.count <= Self.maximoTramos, codigosCandidatos.allSatisfy(\.tieneTexto),
               rutasPorElTrazado.count <= ResultadoBusquedaRutas.maximoRutas,
-              tramos.allSatisfy(\.esValido), rutasPorElTrazado.allSatisfy(\.esValido) else { return false }
+              tramos.allSatisfy(\.esValido), rutasPorElTrazado.allSatisfy(\.esValido),
+              alternativas.count <= Self.maximoAlternativas, alternativas.allSatisfy(\.tieneTexto),
+              alternativas.isEmpty || (resultado == .operativo && tramos.count == 1) else { return false }
         switch resultado {
         case .operativo: return !tramos.isEmpty && codigosCandidatos.isEmpty && rutasPorElTrazado.isEmpty
         case .candidato: return !codigosCandidatos.isEmpty && tramos.isEmpty && rutasPorElTrazado.isEmpty
@@ -222,7 +237,7 @@ struct PlanViaje: Equatable, Sendable {
 
 extension PlanViaje: RespuestaPlanificador {
     private enum Claves: String, CodingKey {
-        case origen, destino, resultado, tramos, rutasPorElTrazado, catalogo
+        case origen, destino, resultado, tramos, rutasPorElTrazado, alternativas, catalogo
     }
 
     init(from decoder: Decoder) throws {
@@ -238,6 +253,8 @@ extension PlanViaje: RespuestaPlanificador {
             codigosCandidatos = []
         }
         rutasPorElTrazado = try contenedor.decode([ResumenRuta].self, forKey: .rutasPorElTrazado)
+        // Opcional: un servidor sin la entrega de las alternativas, o un viaje sin ellas, no manda la clave.
+        alternativas = try contenedor.decodeIfPresent([AlternativaViaje].self, forKey: .alternativas)?.map(\.codigoRuta) ?? []
         catalogo = try contenedor.decode(ProcedenciaCatalogo.self, forKey: .catalogo)
     }
 }
