@@ -16,6 +16,28 @@ enum TextoRutas {
     static let pistaEnlaceViaje = "Eliges el origen y el destino de una lista; no escribes una frase."
     static let consultando = "Buscando rutas…"
 
+    // MARK: Buscar con la voz (components/voice-overlay.tsx)
+
+    static let buscarHablando = "Buscar hablando"
+    static let pistaBuscarHablando = "Abre el micrófono para decir una estación o un código de ruta. También puedes escribirlo."
+    static let tituloVoz = "Comando de voz"
+    static let cerrarMicrofono = "Cerrar micrófono"
+    static let vozEscuchando = "Escuchando…"
+    static let vozListo = "Listo"
+    static let vozTocaParaHablar = "Toca para hablar"
+    static let vozDetener = "Detener"
+    static let vozHablarDeNuevo = "Hablar de nuevo"
+    static let vozTeEscucho = "Te escucho. Di el nombre de una estación o un código de ruta."
+    static let vozSinDictado = "El dictado no está disponible en esta pantalla. Cierra y escribe tu búsqueda."
+    static let vozAvisoEscribir = "Si prefieres, cierra y escribe tu búsqueda."
+    static let vozAvisoServidor = "Lo que dictes se envía como texto al servidor para buscar rutas. No se envía tu ubicación."
+    static func vozTranscripcion(_ texto: String) -> String { "«\(texto)»" }
+
+    // MARK: Rutas frecuentes (el botón «Rutas frecuentes» de components/partial-routes.tsx)
+
+    static let rutasFrecuentes = "Rutas frecuentes"
+    static let pistaRutasFrecuentes = "Tus rutas guardadas. Abre cada una para ver su detalle."
+
     static func entradaInvalida(_ motivo: MotivoEntradaInvalida) -> String {
         switch motivo {
         case .vacia: return "Escribe un código de ruta o el nombre de una estación."
@@ -32,6 +54,8 @@ enum TextoRutas {
 
     static func sinResultados(_ consulta: String) -> String { "No encontré rutas para «\(consulta)»." }
     static let sinResultadosAyuda = "Prueba con el código de la ruta o con el nombre de otra estación."
+
+    static let pistaDetalle = "Abre el detalle y el mapa de la ruta."
 
     static func etiquetaRuta(_ ruta: ResumenRuta) -> String {
         "Ruta \(ruta.codigo), de \(ruta.desde) hacia \(ruta.hacia)"
@@ -63,6 +87,46 @@ enum TextoRutas {
     }
 
     static let tituloHorario = "Horario"
+
+    // MARK: Escuchar y actualización periódica
+
+    static let escuchar = "Escuchar"
+    static let pistaEscuchar = "Lee la ruta en voz alta."
+    static let escuchaNoDisponible = "La voz de la app no está disponible en esta pantalla. La ruta está escrita aquí abajo."
+    static let escuchaConMicrofono = "No se lee en voz alta: el micrófono está abierto."
+    static let actualizacionFallida = "No se pudo actualizar esta pantalla. Lo que ves puede haber vencido: se vuelve a intentar en unos segundos."
+
+    /// Lo que «Escuchar» dice: las mismas frases de `describe` de `route-detail.tsx`, con lo que el servidor decidió
+    /// (`sentido`, `calendario`, `paradaVerificada`). Ni da órdenes de abordaje ni afirma lo que el servidor no confirma.
+    static func descripcionHablada(_ detalle: DetalleRuta) -> String {
+        let sentido: String
+        switch detalle.sentido {
+        case .confirmado:
+            sentido = "de \(detalle.desde) hacia \(detalle.hacia)"
+        case .contradictorio:
+            sentido = "con sentido declarado de \(detalle.desde) hacia \(detalle.hacia), aún sin confirmar porque el orden de las estaciones no coincide"
+        case .sinConfirmar:
+            sentido = "con sentido declarado de \(detalle.desde) hacia \(detalle.hacia), todavía sin confirmar con una fuente vigente"
+        }
+        let cantidad = detalle.estaciones.count
+        let recorrido = "Su recorrido pasa cerca de \(cantidad) \(cantidad == 1 ? "estación" : "estaciones")."
+        let paradas = detalle.estaciones.contains(where: \.paradaVerificada)
+            ? ""
+            : " Aún no tengo confirmado en qué estaciones para, así que no uses el recorrido como paradas de abordaje."
+        let operacion: String
+        switch detalle.calendario {
+        case .opera:
+            operacion = " Según su calendario verificado, hoy tiene servicio programado; no es tiempo real, confirma el horario antes de salir."
+        case .noOpera:
+            operacion = " Según su calendario verificado, hoy no tiene servicio programado."
+        case .sinVerificar:
+            let semana = detalle.horario.entreSemana.trimmingCharacters(in: .whitespacesAndNewlines)
+            operacion = semana.isEmpty
+                ? " No tengo un calendario vigente verificado para confirmar si opera ahora."
+                : " Su horario publicado entre semana es \(semana), pero no tengo un calendario vigente verificado para confirmar si opera ahora."
+        }
+        return "Ruta \(detalle.codigo), \(sentido). \(recorrido)\(paradas)\(operacion) \(detalle.catalogo.procedencia)"
+    }
 
     static func frasesCalendario(_ calendario: CalendarioRuta) -> [String] {
         switch calendario {
@@ -158,7 +222,7 @@ enum TextoRutas {
             return [
                 "El servidor verificó las paradas y el sentido al consultar.",
                 "No es tiempo real: confirma el horario antes de salir.",
-                "Vuelve a planear el viaje si esperas antes de salir: esta pantalla no se actualiza sola.",
+                "Mientras ves esta pantalla, el viaje se vuelve a consultar cada 30 segundos.",
             ]
         case .candidato:
             let varias = plan.codigosCandidatos.count > 1
@@ -181,6 +245,19 @@ enum TextoRutas {
             return ["El origen y el destino que elegiste coinciden: ambos son \(plan.origen)."]
         }
     }
+
+    /// «También te sirven…» de la web, solo con los códigos: la otra ruta puede abordarse en otra estación del mismo lugar y
+    /// el servidor no garantiza la parada, así que no se dice dónde subir.
+    static func tituloAlternativas(_ codigos: [String]) -> String {
+        switch codigos.count {
+        case 0: return ""
+        case 1: return "También te sirve la ruta \(codigos[0])"
+        default: return "También te sirven las rutas \(codigos.dropLast().joined(separator: ", ")) y \(codigos[codigos.count - 1])"
+        }
+    }
+
+    static let notaAlternativas = "El servidor no confirma en qué estación se aborda cada una. Abre su detalle y confirma las paradas."
+    static func etiquetaAlternativa(_ codigo: String) -> String { "Ruta \(codigo), otra ruta directa" }
 
     static func tituloTramo(_ posicion: Int, _ codigo: String) -> String { "Tramo \(posicion): ruta \(codigo)" }
     static let notaTransbordo = "Hay un transbordo entre los dos tramos."

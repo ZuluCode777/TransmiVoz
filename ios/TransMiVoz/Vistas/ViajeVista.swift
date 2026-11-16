@@ -3,10 +3,17 @@ import SwiftUI
 /// Planear un viaje entre dos lugares ELEGIDOS de la lista del servidor. La selección viaja como datos al planificador
 /// compartido (nunca como una frase), y el resultado muestra el listado de tramos y, si hay coordenadas, el mapa de los
 /// mismos tramos. El servidor decide el estado del viaje; la app no lo recalcula ni da órdenes de abordaje.
+///
+/// Como `trip-view.tsx`: con un viaje planeado a la vista se vuelve a planear el mismo viaje cada 30 s (`REVALIDA_MS`),
+/// porque el plan puede dejar de ser válido con el paso del tiempo; el servidor decide cada vez. También muestra las
+/// otras rutas directas que sirven al viaje («También te sirven…»), tal como las manda el servidor: solo códigos.
 struct ViajeVista: View {
     let servicios: ServiciosRutas
     @State private var modelo: ViajeModelo
+    /// La pantalla está a la vista: con ella en segundo plano, o con otra encima, el reloj de 30 s no corre.
+    @State private var aLaVista = false
     @AccessibilityFocusState private var foco: ZonaFocoRutas?
+    @Environment(\.scenePhase) private var faseEscena
 
     init(servicios: ServiciosRutas) {
         self.servicios = servicios
@@ -24,11 +31,25 @@ struct ViajeVista: View {
             }
             .padding(16)
         }
+        .bordeSuperiorNitido()
         .navigationTitle(TextoRutas.tituloViaje)
         .navigationBarTitleDisplayMode(.inline)
         .bordeInferiorLegible()
         .task { modelo.cargarLugaresSiHaceFalta() }
-        .onChange(of: modelo.plan) { _, nuevo in anunciar(nuevo) }
+        .onAppear {
+            aLaVista = true
+            modelo.pantallaVisible(faseEscena == .active)
+        }
+        .onDisappear {
+            aLaVista = false
+            modelo.pantallaVisible(false)
+        }
+        .onChange(of: faseEscena) { _, nueva in modelo.pantallaVisible(aLaVista && nueva == .active) }
+        .onChange(of: modelo.plan) { anterior, nuevo in
+            // La consulta periódica cambia un viaje ya mostrado por otro: no se anuncia ni se mueve el foco.
+            if case .listo = anterior, case .listo = nuevo { return }
+            anunciar(nuevo)
+        }
         .onChange(of: modelo.lugares) { _, nuevo in anunciarLugares(nuevo) }
     }
 
@@ -59,8 +80,7 @@ struct ViajeVista: View {
             Text(TextoRutas.filaSelector(rol, elegido))
                 .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
         }
-        .buttonStyle(.bordered)
-        .controlSize(.large)
+        .buttonStyle(EstiloBotonSecundario())
         .accessibilityHint(TextoRutas.pistaSelector)
         .accessibilityIdentifier(identificador)
     }
@@ -87,7 +107,9 @@ struct ViajeVista: View {
         case .fallo(let error):
             ErrorRutasVista(error: error, foco: $foco, alReintentar: { modelo.planear() })
         case .listo(let plan):
-            PlanViajeVista(plan: plan, servicios: servicios, foco: $foco, alVolverAConsultar: { modelo.planear() })
+            PlanViajeVista(
+                plan: plan, servicios: servicios, foco: $foco, refrescoFallido: modelo.refrescoFallido,
+                alVolverAConsultar: { modelo.planear() })
         }
     }
 
@@ -122,6 +144,8 @@ private struct PlanViajeVista: View {
     let plan: PlanViaje
     let servicios: ServiciosRutas
     var foco: AccessibilityFocusState<ZonaFocoRutas?>.Binding
+    /// La última consulta periódica falló: el viaje que se ve puede haber dejado de ser válido.
+    let refrescoFallido: Bool
     let alVolverAConsultar: () -> Void
 
     var body: some View {
@@ -133,6 +157,11 @@ private struct PlanViajeVista: View {
                 .accessibilityIdentifier("resultado-viaje-titulo")
             ForEach(Array(TextoRutas.notasResultado(plan).enumerated()), id: \.offset) { _, nota in
                 Text(nota).accessibilityIdentifier("nota-viaje")
+            }
+            if refrescoFallido {
+                Text(TextoRutas.actualizacionFallida)
+                    .font(.footnote.bold())
+                    .accessibilityIdentifier("aviso-actualizacion-viaje")
             }
         }
 
@@ -148,6 +177,34 @@ private struct PlanViajeVista: View {
             }
             .accessibilityElement(children: .combine)
             .accessibilityIdentifier("tramo-\(indice + 1)")
+        }
+
+        // «También te sirven…»: otras rutas directas entre los mismos lugares. Solo el código: el servidor no confirma en qué
+        // estación del lugar se aborda cada una, así que no se dice dónde subir; su detalle sí lo cuenta.
+        if !plan.alternativas.isEmpty {
+            VStack(alignment: .leading, spacing: 8) {
+                Text(TextoRutas.tituloAlternativas(plan.alternativas))
+                    .font(.headline)
+                    .accessibilityAddTraits(.isHeader)
+                    .accessibilityIdentifier("titulo-alternativas")
+                Text(TextoRutas.notaAlternativas).foregroundStyle(.textoSecundario)
+            }
+            ForEach(Array(plan.alternativas.enumerated()), id: \.offset) { indice, codigo in
+                NavigationLink {
+                    DetalleRutaVista(servicios: servicios, codigo: codigo)
+                } label: {
+                    Text(TextoRutas.tituloDetalle(codigo))
+                        .font(.headline)
+                        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                        .padding(12)
+                        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Color.textoSecundario, lineWidth: 1))
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(TextoRutas.etiquetaAlternativa(codigo))
+                .accessibilityHint(TextoRutas.pistaDetalle)
+                .accessibilityIdentifier("alternativa-\(indice + 1)")
+            }
         }
 
         // Un candidato solo trae los códigos de sus rutas: ni paradas ni mapa.
@@ -241,6 +298,7 @@ private struct SelectorLugarVista: View {
             .padding(16)
         }
         .scrollDismissesKeyboard(.interactively)
+        .bordeSuperiorNitido()
         .navigationTitle(TextoRutas.tituloSelector(rol))
         .navigationBarTitleDisplayMode(.inline)
         .bordeInferiorLegible()
