@@ -25,7 +25,7 @@ import * as cartografia from "./metro-cartografia"
 import { compilar, nodos, texto } from "./metro-prueba-ui"
 import { MAX_ESTACIONES_CERCANAS, MAX_PLANES_VIAJE, alternativasDelViaje, listarLugares, lugarPorNombre, nearestStations, planTrip } from "./routes"
 import { TransmilenioDataSchema, type TransmilenioData } from "./transmilenio"
-import { EDAD_MAXIMA_POSICION_MS } from "./ubicacion"
+import { DISTANCIA_LLEGADA_M, EDAD_MAXIMA_POSICION_MS, PRECISION_MAXIMA_LLEGADA_M, decisionLlegada } from "./ubicacion"
 
 // EA-25 (#51), paridad con la web: alternativas del viaje, Metro de la Línea 1 y estaciones cercanas. Datos
 // sintéticos de `fixtures-sinteticas.ts` y la copia guardada; sin red.
@@ -464,6 +464,99 @@ test("estaciones-cercanas con la lectura vencida: ubicacion-vencida, sin estacio
   const vencida = cercanas({ ...persona, edadMs: EDAD_MAXIMA_POSICION_MS + 1 })
   assert.deepEqual(vencida, { resultado: "ubicacion-vencida", estaciones: [], catalogo: vigente.catalogo })
   assert.equal(cercanas(persona).resultado, "cercanas", "sin edad, recién capturada")
+})
+
+/** Punto a `metros` al norte de una estación, en su misma longitud (un grado de latitud son 6.371.000 · π/180 m). */
+const alNorteDe = (estacion: { lat: number; lng: number }, metros: number) => ({ lat: estacion.lat + metros / ((6_371_000 * Math.PI) / 180), lng: estacion.lng })
+/** `muyCerca` de cada estación devuelta, con su nombre, para leer los casos de un vistazo. */
+const proximidad = (peticion: Record<string, unknown>, data: TransmilenioData = red) =>
+  Object.fromEntries(soloCercanas(cercanas(peticion, data)).map((e) => [e.nombre, e.muyCerca]))
+
+test("estaciones-cercanas muyCerca: con precisión fiable y a menos de 30 m, solo la estación cercana lo es", () => {
+  assert.equal(DISTANCIA_LLEGADA_M, 30)
+  assert.equal(PRECISION_MAXIMA_LLEGADA_M, 50)
+  // Parado sobre Alfa con 10 m de precisión; las demás están a unos 2 km.
+  assert.deepEqual(proximidad({ lat: alfa.lat, lng: alfa.lng, precision: 10 }), { Alfa: true, Bravo: false, Charlie: false, Delta: false })
+  // Los extremos de lo fiable todavía cuentan: 50 m de precisión y 29 m de distancia.
+  assert.equal(proximidad({ ...alNorteDe(alfa, 29), precision: PRECISION_MAXIMA_LLEGADA_M }).Alfa, true)
+  // Con rumbo y sin él da lo mismo: la cercanía no depende de la brújula.
+  assert.equal(proximidad({ lat: alfa.lat, lng: alfa.lng, precision: 10, rumbo: { grados: 90, calidad: 5, edadMs: 0 } }).Alfa, true)
+})
+
+test("estaciones-cercanas muyCerca: cerca pero con precisión insuficiente (más de 50 m) nunca es true", () => {
+  // La misma posición que la prueba anterior, pero con 51 m y con 200 m de margen de error.
+  for (const precision of [PRECISION_MAXIMA_LLEGADA_M + 0.1, 200]) {
+    const estaciones = soloCercanas(cercanas({ lat: alfa.lat, lng: alfa.lng, precision }))
+    assert.equal(estaciones[0].nombre, "Alfa")
+    assert.equal(estaciones[0].distanciaMetros, 0, "está encima de la estación")
+    assert.equal(estaciones[0].muyCerca, false, `precisión ${precision} m`)
+    assert.ok(estaciones.every((e) => e.muyCerca === false))
+  }
+})
+
+test("estaciones-cercanas muyCerca: sin precisión conocida nunca es true, ni a 0 m ni con rumbo fiable", () => {
+  const sinPrecision = soloCercanas(cercanas({ lat: alfa.lat, lng: alfa.lng, rumbo: { grados: 90, calidad: 5, edadMs: 0 } }))
+  assert.equal(sinPrecision[0].distanciaMetros, 0)
+  assert.equal(sinPrecision[0].muyCerca, false)
+  assert.ok(sinPrecision.every((e) => e.muyCerca === false))
+  // Una precisión de 0 m sí es conocida (finita): cuenta.
+  assert.equal(proximidad({ lat: alfa.lat, lng: alfa.lng, precision: 0 }).Alfa, true)
+})
+
+test("estaciones-cercanas muyCerca: lejos (a más de 30 m) es false aunque la precisión sea excelente", () => {
+  assert.deepEqual(proximidad({ ...persona, precision: 5 }), { Bravo: false, Alfa: false, Charlie: false, Delta: false })
+  // Justo fuera: 31 m al norte de Alfa con 5 m de precisión.
+  const justoFuera = soloCercanas(cercanas({ ...alNorteDe(alfa, 31), precision: 5 }))[0]
+  assert.equal(justoFuera.nombre, "Alfa")
+  assert.equal(justoFuera.muyCerca, false)
+})
+
+test("estaciones-cercanas muyCerca: decide con la distancia SIN redondear, como la web", () => {
+  // A 30,4 m: la distancia entera que se devuelve es 30 (≤ 30), pero la real pasa de 30 y no es «muy cerca».
+  const posicion = alNorteDe(alfa, 30.4)
+  assert.ok(distanceMeters(posicion, alfa) > DISTANCIA_LLEGADA_M && Math.round(distanceMeters(posicion, alfa)) === DISTANCIA_LLEGADA_M)
+  const [primera] = soloCercanas(cercanas({ ...posicion, precision: 10 }))
+  assert.equal(primera.distanciaMetros, 30)
+  assert.equal(primera.muyCerca, false)
+  // A 29,6 m, que también se redondea a 30, sí lo es.
+  const [dentro] = soloCercanas(cercanas({ ...alNorteDe(alfa, 29.6), precision: 10 }))
+  assert.equal(dentro.distanciaMetros, 30)
+  assert.equal(dentro.muyCerca, true)
+})
+
+test("estaciones-cercanas muyCerca: con la lectura vencida no hay estaciones y por tanto ninguna proximidad", () => {
+  // Encima de Alfa y con buena precisión, pero la lectura tiene 60.001 ms: la web no la usa.
+  const vencida = cercanas({ lat: alfa.lat, lng: alfa.lng, precision: 5, edadMs: EDAD_MAXIMA_POSICION_MS + 1 })
+  assert.equal(vencida.resultado, "ubicacion-vencida")
+  assert.deepEqual(vencida.estaciones, [])
+  assert.doesNotMatch(JSON.stringify(vencida), /muyCerca/)
+  // En el límite todavía vale.
+  assert.equal(proximidad({ lat: alfa.lat, lng: alfa.lng, precision: 5, edadMs: EDAD_MAXIMA_POSICION_MS }).Alfa, true)
+})
+
+test("estaciones-cercanas muyCerca: es la decisión de la web (decisionLlegada) para cada estación de la copia guardada", () => {
+  for (const estacion of copia.stations.slice(0, 40)) {
+    for (const [metros, precision] of [[0, 10], [20, 40], [20, 80], [45, 10]] as const) {
+      const posicion = alNorteDe(estacion, metros)
+      for (const e of soloCercanas(cercanas({ ...posicion, precision }, copia))) {
+        const real = nearestStations(posicion, copia, MAX_ESTACIONES_CERCANAS).find((x) => x.name === e.nombre)!
+        assert.equal(e.muyCerca, decisionLlegada({ precision }, real.distance).llego, `${e.nombre} a ${metros} m con ±${precision} m`)
+      }
+    }
+  }
+})
+
+test("estaciones-cercanas muyCerca: es opcional y booleano para quien no lo conoce, y no cambia el resto de la respuesta", () => {
+  const cuerpo = resolver({ operacion: "estaciones-cercanas", ...persona, precision: 10 } as PeticionPlanificador, red, ahora).cuerpo as { estaciones: Record<string, unknown>[] }
+  assert.ok(cuerpo.estaciones.every((e) => typeof e.muyCerca === "boolean"), "siempre presente y booleano en el servidor")
+  assert.deepEqual(Object.keys(cuerpo.estaciones[0]).sort(), ["coordenada", "distanciaHablada", "distanciaMetros", "muyCerca", "nombre", "orientacion"])
+  // Un servidor sin desplegar no lo manda y sigue siendo válido; un valor que no es booleano, no.
+  const sinCampo = structuredClone(cuerpo)
+  for (const e of sinCampo.estaciones) delete e.muyCerca
+  assert.equal(RespuestaEstacionesCercanasSchema.safeParse({ ...sinCampo, resultado: "cercanas", catalogo: { procedencia: "x", antiguo: false } }).success, true)
+  const textoEnVezDeBooleano = structuredClone(cuerpo)
+  textoEnVezDeBooleano.estaciones[0].muyCerca = "true"
+  assert.equal(RespuestaEstacionesCercanasSchema.safeParse({ ...textoEnVezDeBooleano, resultado: "cercanas", catalogo: { procedencia: "x", antiguo: false } }).success, false)
 })
 
 test("estaciones-cercanas (privacidad): la respuesta no devuelve la coordenada, la precisión ni el rumbo recibidos", () => {

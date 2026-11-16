@@ -20,7 +20,7 @@ import {
 } from "@/lib/routes"
 import { normalize } from "@/lib/text"
 import { catalogoAntiguo, procedenciaCatalogo } from "@/lib/transmilenio"
-import { cardinalHacia, orientarHacia, ubicacionVigente, type LecturaRumbo, type LecturaUbicacion } from "@/lib/ubicacion"
+import { cardinalHacia, decisionLlegada, orientarHacia, ubicacionVigente, type LecturaRumbo, type LecturaUbicacion } from "@/lib/ubicacion"
 
 export { RespuestaMetroSchema } from "@/lib/contrato-metro"
 
@@ -208,6 +208,12 @@ const EstacionCercanaSchema = z.object({
     /** La frase que la web dice al orientar hacia la estación. */
     indicacion: z.string(),
   }),
+  /**
+   * OPCIONAL. `true` si la web anunciaría «Estás muy cerca de…» (`decisionLlegada`): a 30 m o menos del punto de la
+   * estación Y con `precision` conocida de 50 m o menos. Es cercanía a un punto de referencia APROXIMADO, no un acceso
+   * verificado. Un servidor sin el campo equivale a `false`.
+   */
+  muyCerca: z.boolean().optional(),
 })
 
 /**
@@ -357,6 +363,8 @@ export function resolverPeticion(peticion: PeticionPlanificador, data: Transmile
         distanciaMetros: Math.round(estacion.distance),
         distanciaHablada: spokenDistance(estacion.distance),
         orientacion: { ...orientarHacia(estacion, lectura, rumbo, instante), cardinal: cardinalHacia(lectura, estacion) },
+        // Con la distancia sin redondear, como la web: sin precisión conocida o de más de 50 m nunca es `true`.
+        muyCerca: decisionLlegada(lectura, estacion.distance).llego,
       }))
       return { estado: 200, cuerpo: { resultado: "cercanas", estaciones, catalogo } }
     }

@@ -27,7 +27,7 @@ El backend es el único dueño de estaciones y planificación. Hasta ahora ning�
 | `listar-lugares` | nada más | `lugares[]` (nombres únicos, ordenados), `catalogo` |
 | `planear-viaje` | `origen` y `destino` (1–80), nombres exactos de `listar-lugares` | `origen`, `destino`, `resultado`, `tramos[]` (hasta 2; completos solo si `operativo`, y solo `{codigoRuta}` si `candidato`), `rutasPorElTrazado[]`, `catalogo`, y **opcional** `alternativas[]` (hasta 2 `{codigoRuta}`, solo en un `operativo` directo; ver [abajo](#1-alternativas-del-viaje-planear-viaje)) |
 | `metro-linea-1` | nada más | `linea`, `textoEstado`, `mapa` (rótulo, aviso, atribución, trazado), `estaciones[]` (16, con su huella), `linea2`, `corte`, `atribucion`, `fuentes[]`; ver [abajo](#2-metro-línea-1-metro-linea-1) |
-| `estaciones-cercanas` | `lat` y `lng` (rangos válidos); opcionales `precision`, `edadMs`, `rumbo` | `resultado` (`cercanas` o `ubicacion-vencida`), `estaciones[]` (hasta 4: nombre, coordenada, distancia, orientación), `catalogo`; ver [abajo](#3-estaciones-cercanas-estaciones-cercanas) |
+| `estaciones-cercanas` | `lat` y `lng` (rangos válidos); opcionales `precision`, `edadMs`, `rumbo` | `resultado` (`cercanas` o `ubicacion-vencida`), `estaciones[]` (hasta 4: nombre, coordenada, distancia, orientación, `muyCerca`), `catalogo`; ver [abajo](#3-estaciones-cercanas-estaciones-cercanas) |
 
 - Valida con Zod (`strictObject`: un campo de más o una frase en lugar de datos da 400; también una operación desconocida). Cuerpo de hasta 1.000 bytes, comprobado en el manejador **después** de que el `proxy` lo almacene entero (Next lo carga antes de llamar al manejador; ver [EA-10](ea-10-recursos-autenticacion.md)): la cota limita lo que se procesa, no lo que se recibe. 404 `{"error":"no-encontrado"}` para una ruta o lugar que no existe; un nombre que no es exactamente un lugar (por ejemplo «de Ricaurte a Calle 72») no se interpreta: es 404.
 - Usa las funciones de la web: `searchRoutes`, `planTrip`, `planTripCandidato`, `routesAlongBoth`, `paradasPrescriptibles`, `sentidoConfirmado`, `estadoCalendarioEnFecha`. Solo se añadieron `listarLugares` y `lugarPorNombre` en `lib/routes.ts`.
@@ -127,7 +127,7 @@ Recomendación para la app: `trueHeading` de `CLHeading` si es válido (no negat
 | Campo | Contenido |
 | --- | --- |
 | `resultado` | `cercanas`, o `ubicacion-vencida` (lectura de más de 60 s; `estaciones` vacío; la app dice su propio texto, no hay uno en el contrato) |
-| `estaciones[]` | Hasta 4, de más cerca a más lejos. Cada una: `nombre`, `coordenada` (`lat`, `lng` de la estación, para el mapa), `distanciaMetros` (entero), `distanciaHablada` («90 metros», «1,2 kilómetros»; la que dice la web) y `orientacion` |
+| `estaciones[]` | Hasta 4, de más cerca a más lejos. Cada una: `nombre`, `coordenada` (`lat`, `lng` de la estación, para el mapa), `distanciaMetros` (entero), `distanciaHablada` («90 metros», «1,2 kilómetros»; la que dice la web), `orientacion` y `muyCerca` (opcional: ver [abajo](#muycerca-el-aviso-de-proximidad)) |
 | `orientacion` | `modo`, `cardinal`, `relativa`, `indicacion` |
 | `catalogo` | `procedencia` y `antiguo`, como en las demás operaciones |
 
@@ -148,19 +148,35 @@ POST /api/planificador
 { "resultado": "cercanas",
   "estaciones": [
     { "nombre": "Ricaurte - NQS", "coordenada": { "lat": 4.611683784449027, "lng": -74.09386594942337 }, "distanciaMetros": 89, "distanciaHablada": "90 metros",
-      "orientacion": { "modo": "relativa", "cardinal": "al suroeste", "relativa": "hacia atrás a tu derecha", "indicacion": "Ricaurte - NQS está a 90 metros hacia atrás a tu derecha." } },
+      "orientacion": { "modo": "relativa", "cardinal": "al suroeste", "relativa": "hacia atrás a tu derecha", "indicacion": "Ricaurte - NQS está a 90 metros hacia atrás a tu derecha." },
+      "muyCerca": false },
     { "nombre": "Ricaurte - CL 13", "coordenada": { "lat": 4.612680959785939, "lng": -74.09009249415548 }, "distanciaMetros": 379, "distanciaHablada": "380 metros",
-      "orientacion": { "modo": "relativa", "cardinal": "al este", "relativa": "de frente", "indicacion": "Ricaurte - CL 13 está a 380 metros de frente." } } ],
+      "orientacion": { "modo": "relativa", "cardinal": "al este", "relativa": "de frente", "indicacion": "Ricaurte - CL 13 está a 380 metros de frente." },
+      "muyCerca": false } ],
   "catalogo": { "procedencia": "Datos de una copia guardada de TransMilenio del 24/9/2026 (sin conexión al servicio en vivo).", "antiguo": true } }
 ```
 
 (Respuesta recortada a 2 de 4 estaciones.)
 
+#### `muyCerca`: el aviso de proximidad
+
+Es la decisión del aviso «Estás muy cerca de…» de la web (`decisionLlegada` en `lib/ubicacion.ts`, el mismo código; no se copió ninguna regla). Campo **opcional y booleano** en cada elemento de `estaciones[]`; **la app trata la ausencia como `false`** (un servidor sin desplegar no lo manda y la respuesta sigue siendo válida).
+
+| `muyCerca` | Cuándo |
+| --- | --- |
+| `true` | La estación está a **30 m o menos** de la posición (distancia **sin redondear**: `distanciaMetros` puede decir 30 y ser `false` si la real es 30,4 m) **y** `precision` es conocida y de **50 m o menos** |
+| `false` | A más de 30 m; o sin `precision`; o con `precision` de más de 50 m. Nunca es `true` por falta de dato |
+
+- **Posición vencida.** Con más de 60 s (`ubicacion-vencida`) no hay estaciones y por tanto ningún `muyCerca`: no hay proximidad que anunciar.
+- **Es cercanía a un punto de referencia aproximado, no un acceso verificado.** Si la app lo anuncia, debe decir lo mismo que la web: «Estás muy cerca de {estación}, a unos {distanciaHablada}. Busca el acceso de la estación; el punto es una referencia aproximada, no un acceso verificado.». No promete llegada ni acceso accesible.
+- Independiente de la brújula: no cambia con `rumbo`.
+- Lo que sigue **en la app** (no en el contrato): decidir de qué estación avisar (la web solo avisa de la estación que la persona eligió con «Oriéntame por voz»), avisar una sola vez por destino y rearmar el aviso al elegir otro, y pedirlo de nuevo con una lectura nueva (a demanda, no en cada actualización de CoreLocation).
+
 **Privacidad.** La coordenada, la precisión y el rumbo viajan en el **cuerpo** del POST, nunca en la URL (los registros de acceso de una plataforma suelen guardar la URL). El manejador y el contrato **no escriben ningún registro** (una prueba lo comprueba en el código y con la salida real), **no guardan nada** (sin base de datos, sin caché de peticiones, sin la coordenada en la clave del límite: `claveCliente()` es una sola clave global) y **no envían la coordenada a ningún otro servicio**. La respuesta **no repite** la coordenada, la precisión ni el rumbo; devuelve solo coordenadas de estaciones, que son del catálogo, y las distancias y direcciones que la respuesta necesita. Lo que este código no controla: los registros de Render o de la red delante del servidor, y el hecho de que cuatro distancias a estaciones conocidas bastarían, a quien las vea, para estimar la posición; la respuesta solo vuelve a quien la pidió.
 
 **Uso desde la app.** Pedirlo a demanda (al activar la ubicación, al «Repetir indicación», al renovar), **no en cada actualización de CoreLocation**: las otras cinco operaciones comparten 60 peticiones por minuto en todo el servidor.
 
-**Qué no está en este contrato** (diferencias con el GPS de la web): el aviso de proximidad («Estás muy cerca de…», `decisionLlegada`: menos de 30 m con precisión de 50 m o menos) y su seguimiento de un destino elegido; el enlace a Google Maps; el texto de «ubicación vencida» y los de permisos; y el mapa con «Tú estás aquí». Ver las preguntas abiertas en el PR.
+**Qué no está en este contrato** (diferencias con el GPS de la web): la elección de un destino y el aviso único de proximidad (la decisión es `muyCerca`; el seguimiento es de la app); el enlace a Google Maps; el texto de «ubicación vencida» y los de permisos; y el mapa con «Tú estás aquí».
 
 ## Paridad con la web
 
