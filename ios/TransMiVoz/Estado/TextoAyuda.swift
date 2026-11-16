@@ -29,7 +29,7 @@ enum TextoAyuda {
             "TransMiVoz te orienta con el transporte público de Bogotá. En el iPhone tiene tres partes: Sesión, Consulta y Ajustes.",
         ]),
         SeccionAyuda(titulo: "Cómo usarla", parrafos: [
-            "Ajustes: escribe la dirección del servidor y, si te la dieron, la clave. Sin servidor, la Consulta no responde. En el menú «Más ajustes», arriba a la derecha, están Preferencias, Favoritas y esta Ayuda.",
+            "Ajustes: escribe la dirección del servidor y, si te la dieron, la clave. Sin servidor, la Consulta no responde. En el menú «Más ajustes», arriba a la derecha, están Preferencias, Favoritas, el Diagnóstico (comprueba en vivo que cada función responde) y esta Ayuda.",
             "Consulta: escribe tu pregunta, por ejemplo una ruta o una estación, y toca Enviar. Necesita conexión a internet y no envía tu ubicación.",
             "Sesión: es para el accesorio de proximidad por Bluetooth. Puedes buscarlo, elegirlo e iniciar la sesión. Las medidas y los avisos del sensor se ven y se dicen con una reserva, porque el enlace con el accesorio no está autenticado (más abajo, «Accesorio de proximidad»).",
         ]),
