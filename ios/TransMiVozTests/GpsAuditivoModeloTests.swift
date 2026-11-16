@@ -13,6 +13,7 @@ final class GpsAuditivoModeloTests: XCTestCase {
         let cliente = ClientePlanificadorFalso()
         let ubicacion: UbicacionFalsa
         let locutor = LocutorFalso()
+        let abridor = AbridorFalso()
         let reloj = RelojFalso()
         let modelo: GpsAuditivoModelo
         private var respondidas = 0
@@ -21,7 +22,7 @@ final class GpsAuditivoModeloTests: XCTestCase {
         init(brujula: Bool = true, sinTemporizador: Bool = false) {
             ubicacion = UbicacionFalsa(rumboDisponible: brujula)
             modelo = GpsAuditivoModelo(
-                cliente: cliente, proveedor: ubicacion, locutor: locutor, reloj: { [reloj] in reloj.ahora },
+                cliente: cliente, proveedor: ubicacion, locutor: locutor, abridor: abridor, reloj: { [reloj] in reloj.ahora },
                 // Despierta rápido y vuelve a mirar el reloj de la prueba: no espera 60 s de verdad.
                 dormir: { _ in try await Task.sleep(nanoseconds: sinTemporizador ? 3_600_000_000_000 : 2_000_000) })
         }
@@ -665,5 +666,360 @@ final class GpsAuditivoModeloTests: XCTestCase {
         XCTAssertEqual(banco.ubicacion.iniciados, 2)
         await banco.cliente.cercanas.esperar(2)
         XCTAssertEqual(banco.cliente.lecturas.count, 2)
+    }
+
+    // MARK: - Refresco automático de la estación elegida, reutilización del modelo, voz ocupada y Mapas
+
+    private var centroNombre: String { "Estación Ejemplo Centro" }
+    private var norteNombre: String { "Estación Ejemplo Norte" }
+
+    /// Activa, recibe la primera respuesta y elige la estación Centro. Deja el reloj en el instante de la primera petición.
+    private func conEstacionElegida(_ banco: Banco, respuesta: String = FixturesParidad.cercanasRelativa) async throws {
+        banco.activar()
+        try await banco.responder(respuesta)
+        banco.modelo.orientarHacia(centroNombre)
+    }
+
+    /// Avanza `ms` en pasos de un segundo con una lectura nueva en cada uno (como el GPS) y deja correr los temporizadores.
+    private func caminar(_ banco: Banco, ms: Milisegundos) async {
+        var restante = ms
+        while restante > 0 {
+            let paso = min(restante, 1_000)
+            banco.reloj.avanzar(paso)
+            banco.ubicacion.emitir(banco.posicion())
+            restante -= paso
+            await dejarPasar(8)
+        }
+    }
+
+    // MARK: Refresco cada 20 s
+
+    func testLaEstacionElegidaSeRefrescaSolaCada20SegundosYDiceLaCercaniaSoloUnaVez() async throws {
+        let banco = Banco()
+        try await conEstacionElegida(banco)
+        XCTAssertTrue(banco.modelo.refrescoProgramado)
+        XCTAssertEqual(banco.peticiones, 1)
+
+        banco.reloj.avanzar(GpsAuditivoModelo.intervaloRefrescoMs - 1)
+        await dejarPasar(40)
+        XCTAssertEqual(banco.peticiones, 1, "todavía no pasaron 20 s desde la última petición")
+
+        banco.reloj.avanzar(1)
+        banco.ubicacion.emitir(banco.posicion(lat: 4.6504, lng: -74.0851)) // la persona llegó a la estación
+        await banco.cliente.cercanas.esperar(2)
+        XCTAssertEqual(banco.peticiones, 2, "pasados los 20 s pide sola")
+        XCTAssertEqual(banco.cliente.lecturas[1].latitud, 4.6504, "pide con la lectura de ahora")
+        try await banco.responder(FixturesParidad.cercanasMuyCerca)
+        XCTAssertEqual(banco.locutor.dichos.last, TextoGps.muyCerca(try estacion(FixturesParidad.cercanasMuyCerca)))
+        XCTAssertFalse(banco.locutor.dichos.last?.hasPrefix("Estaciones actualizadas") ?? true, "el refresco solo dice la cercanía")
+        XCTAssertTrue(banco.modelo.refrescoProgramado, "el ciclo sigue mientras haya estación elegida")
+
+        banco.reloj.avanzar(GpsAuditivoModelo.intervaloRefrescoMs)
+        await banco.cliente.cercanas.esperar(3)
+        try await banco.responder(FixturesParidad.cercanasMuyCerca)
+        XCTAssertEqual(banco.locutor.dichos.filter { $0.contains("Estás muy cerca de") }.count, 1, "una vez por estación elegida")
+    }
+
+    func testElRefrescoAutomaticoNoDiceNadaSiElServidorNoMarcaCercania() async throws {
+        let banco = Banco()
+        try await conEstacionElegida(banco)
+        let dichos = banco.locutor.dichos.count
+        banco.reloj.avanzar(GpsAuditivoModelo.intervaloRefrescoMs)
+        banco.ubicacion.emitir(banco.posicion())
+        await banco.cliente.cercanas.esperar(2)
+        try await banco.responder(FixturesParidad.cercanasRelativa)
+        XCTAssertEqual(banco.locutor.dichos.count, dichos, "ni «actualizadas» ni la indicación: el refresco es silencioso")
+        XCTAssertNotNil(banco.modelo.respuesta)
+    }
+
+    func testSinEstacionElegidaNoHayRefresco() async throws {
+        let banco = Banco()
+        banco.activar()
+        try await banco.responder(FixturesParidad.cercanasRelativa)
+        XCTAssertFalse(banco.modelo.refrescoProgramado)
+        await caminar(banco, ms: 100_000)
+        XCTAssertEqual(banco.peticiones, 1, "sin estación elegida solo se pide cuando la persona lo pide")
+    }
+
+    func testUnFalloDelRefrescoNoSeReintentaSoloYLoReanudaLaPersona() async throws {
+        let banco = Banco()
+        try await conEstacionElegida(banco)
+        banco.reloj.avanzar(GpsAuditivoModelo.intervaloRefrescoMs)
+        banco.ubicacion.emitir(banco.posicion())
+        await banco.cliente.cercanas.esperar(2)
+        await banco.fallar(.sinConexion)
+        XCTAssertEqual(banco.modelo.fallo, .sinConexion)
+        XCTAssertFalse(banco.modelo.refrescoProgramado, "un fallo detiene el ciclo")
+
+        await caminar(banco, ms: 90_000)
+        XCTAssertEqual(banco.peticiones, 2, "ni 90 s de lecturas ni los temporizadores reintentan solos")
+
+        banco.modelo.actualizar() // la persona decide
+        await banco.cliente.cercanas.esperar(3)
+        try await banco.responder(FixturesParidad.cercanasRelativa)
+        XCTAssertNil(banco.modelo.fallo)
+        XCTAssertEqual(banco.modelo.objetivo, centroNombre, "la estación elegida sigue siendo la misma")
+        XCTAssertTrue(banco.modelo.refrescoProgramado, "con una respuesta buena el ciclo se retoma")
+    }
+
+    func testUnFalloDeUnaPeticionManualTambienDetieneElRefresco() async throws {
+        let banco = Banco()
+        try await conEstacionElegida(banco)
+        XCTAssertTrue(banco.modelo.refrescoProgramado)
+        banco.reloj.avanzar(GpsAuditivoModelo.intervaloMinimoMs)
+        banco.ubicacion.emitir(banco.posicion())
+        banco.modelo.actualizar() // la persona pide a los 10 s, antes de que toque el automático
+        await banco.cliente.cercanas.esperar(2)
+        await banco.fallar(.tiempoAgotado)
+        XCTAssertEqual(banco.modelo.fallo, .tiempoAgotado)
+        XCTAssertFalse(banco.modelo.refrescoProgramado)
+        await caminar(banco, ms: 70_000)
+        XCTAssertEqual(banco.peticiones, 2, "nada lo reintenta")
+    }
+
+    func testElRefrescoSeCancelaAlDetenerSuspenderPerderElPermisoOSoltarLaEstacion() async throws {
+        // Detener y suspender.
+        for suspender in [false, true] {
+            let banco = Banco()
+            try await conEstacionElegida(banco)
+            XCTAssertTrue(banco.modelo.refrescoProgramado)
+            if suspender { banco.modelo.suspender() } else { banco.modelo.detener() }
+            XCTAssertFalse(banco.modelo.refrescoProgramado)
+            banco.reloj.avanzar(120_000)
+            await dejarPasar(40)
+            XCTAssertEqual(banco.peticiones, 1, "pasado el tiempo no sale ninguna petición")
+            XCTAssertEqual(banco.modelo.estado, .inactivo, "nada reinicia la sesión")
+        }
+        // Permiso revocado.
+        let revocado = Banco()
+        try await conEstacionElegida(revocado)
+        revocado.ubicacion.emitir(.permiso(.denegado))
+        XCTAssertFalse(revocado.modelo.refrescoProgramado)
+        // La estación elegida deja de estar entre las cercanas: se suelta, se dice y con ella se va el refresco.
+        let fuera = Banco()
+        try await conEstacionElegida(fuera)
+        fuera.reloj.avanzar(GpsAuditivoModelo.intervaloRefrescoMs)
+        fuera.ubicacion.emitir(fuera.posicion())
+        await fuera.cliente.cercanas.esperar(2)
+        let sinCentro = modificar(FixturesParidad.cercanasRelativa) { objeto in
+            objeto["estaciones"] = Array((objeto["estaciones"] as? [Any] ?? []).dropFirst())
+        }
+        try await fuera.responder(sinCentro)
+        XCTAssertNil(fuera.modelo.objetivo)
+        XCTAssertFalse(fuera.modelo.refrescoProgramado)
+        XCTAssertEqual(fuera.locutor.dichos.last, TextoGps.fueraDeLasMasCercanas(centroNombre))
+        fuera.reloj.avanzar(120_000)
+        await dejarPasar(40)
+        XCTAssertEqual(fuera.peticiones, 2)
+    }
+
+    func testSinLecturaVigenteElRefrescoSeCancelaYNoSalePeticion() async throws {
+        let banco = Banco()
+        try await conEstacionElegida(banco)
+        banco.reloj.avanzar(60_001) // sin lecturas nuevas: la ubicación vence antes que el refresco
+        await esperarHasta("que venza la lectura") { banco.modelo.estado == .vencida }
+        XCTAssertFalse(banco.modelo.refrescoProgramado)
+        await dejarPasar(60)
+        XCTAssertEqual(banco.peticiones, 1, "no se envía una lectura vencida")
+    }
+
+    func testUnaPeticionEnCursoNuncaTieneOtraAlLado() async throws {
+        let banco = Banco()
+        try await conEstacionElegida(banco)
+        banco.reloj.avanzar(GpsAuditivoModelo.intervaloRefrescoMs)
+        banco.ubicacion.emitir(banco.posicion())
+        await banco.cliente.cercanas.esperar(2)
+        banco.reloj.avanzar(GpsAuditivoModelo.intervaloRefrescoMs * 2) // el servidor tarda: vencen otros dos ciclos
+        banco.ubicacion.emitir(banco.posicion())
+        await dejarPasar(60)
+        XCTAssertEqual(banco.peticiones, 2, "con una en vuelo no se encola otra")
+        // Contesta la 2.ª: como ya pasó el tiempo, el ciclo sigue enseguida con la 3.ª (no se espera a `consultando == false`).
+        banco.cliente.cercanas.responder(.success(try decodificarPlanificador(FixturesParidad.cercanasRelativa)), indice: 1)
+        await banco.cliente.cercanas.esperar(3)
+        XCTAssertEqual(banco.peticiones, 3, "al terminar, el ciclo sigue (ya pasó el tiempo)")
+        XCTAssertTrue(banco.modelo.consultando)
+    }
+
+    func testCuandoSuenaOtroAvisoLaCercaniaNoSeDaPorDichaYSeReintentaEnElSiguienteRefresco() async throws {
+        let banco = Banco()
+        try await conEstacionElegida(banco)
+        banco.locutor.resultado = .ocupada // suena un aviso del accesorio
+        banco.reloj.avanzar(GpsAuditivoModelo.intervaloRefrescoMs)
+        banco.ubicacion.emitir(banco.posicion())
+        await banco.cliente.cercanas.esperar(2)
+        try await banco.responder(FixturesParidad.cercanasMuyCerca)
+        XCTAssertEqual(banco.locutor.dichos.filter { $0.contains("Estás muy cerca de") }.count, 1, "se intentó")
+        XCTAssertNil(banco.modelo.aviso, "el refresco no avisa de que no pudo hablar")
+        XCTAssertEqual(banco.modelo.estacionElegida?.muyCerca, true, "en pantalla sí queda, por el indicador del servidor")
+
+        banco.locutor.resultado = .hablada // el aviso terminó
+        banco.reloj.avanzar(GpsAuditivoModelo.intervaloRefrescoMs)
+        banco.ubicacion.emitir(banco.posicion())
+        await banco.cliente.cercanas.esperar(3)
+        try await banco.responder(FixturesParidad.cercanasMuyCerca)
+        XCTAssertEqual(banco.locutor.dichos.filter { $0.contains("Estás muy cerca de") }.count, 2, "se reintenta hasta que se oiga")
+        banco.reloj.avanzar(GpsAuditivoModelo.intervaloRefrescoMs)
+        banco.ubicacion.emitir(banco.posicion())
+        await banco.cliente.cercanas.esperar(4)
+        try await banco.responder(FixturesParidad.cercanasMuyCerca)
+        XCTAssertEqual(banco.locutor.dichos.filter { $0.contains("Estás muy cerca de") }.count, 2, "ya se dijo: no se repite")
+    }
+
+    func testUnaAccionDeLaPersonaConOtroAvisoSonandoExplicaPorQueNoSeOyo() async throws {
+        let banco = Banco()
+        banco.activar()
+        try await banco.responder(FixturesParidad.cercanasRelativa)
+        banco.locutor.resultado = .ocupada
+        banco.modelo.repetirIndicacion()
+        XCTAssertEqual(banco.modelo.aviso, TextoGps.vozOcupada)
+    }
+
+    // MARK: Peticiones: manuales y automáticas juntas
+
+    func testManualesYAutomaticasJuntasNoPasanDeSeisPorMinuto() async throws {
+        let banco = Banco()
+        try await conEstacionElegida(banco)
+        var respondidas = 1
+        for _ in 0..<60 {
+            banco.reloj.avanzar(1_000)
+            banco.ubicacion.emitir(banco.posicion())
+            banco.modelo.actualizar() // la persona insiste cada segundo
+            banco.modelo.repetirIndicacion()
+            await dejarPasar(12)
+            while respondidas < banco.peticiones {
+                try await banco.responder(FixturesParidad.cercanasRelativa)
+                respondidas += 1
+            }
+        }
+        XCTAssertLessThanOrEqual(banco.peticiones, 7, "la primera más como mucho 6 en el minuto: tres teléfonos no pasan de 18")
+        XCTAssertGreaterThanOrEqual(banco.peticiones, 6)
+    }
+
+    func testSoloElRefrescoAutomaticoPideTresVecesPorMinuto() async throws {
+        let banco = Banco()
+        try await conEstacionElegida(banco)
+        var respondidas = 1
+        for _ in 0..<60 {
+            banco.reloj.avanzar(1_000)
+            banco.ubicacion.emitir(banco.posicion())
+            await dejarPasar(12)
+            while respondidas < banco.peticiones {
+                try await banco.responder(FixturesParidad.cercanasRelativa)
+                respondidas += 1
+            }
+        }
+        XCTAssertEqual(banco.peticiones, 4, "la primera y una cada 20 s: a los 20, 40 y 60 s")
+    }
+
+    func testLasLecturasDelSensorNuncaPidenPorSiSolas() async throws {
+        let banco = Banco()
+        try await conEstacionElegida(banco)
+        for i in 0..<300 {
+            banco.ubicacion.emitir(banco.posicion(lat: 4.6124 + Double(i) * 0.00001)) // 300 lecturas sin que pase el tiempo
+            banco.ubicacion.emitir(banco.rumbo(grados: Double(i % 360)))
+        }
+        await dejarPasar(60)
+        XCTAssertEqual(banco.peticiones, 1)
+    }
+
+    // MARK: Reutilización tras suspender (la raíz suspende al cambiar de pestaña)
+
+    func testElModeloSeReutilizaTrasSuspenderYEmpiezaLimpio() async throws {
+        let banco = Banco()
+        banco.modelo.iniciar()
+        banco.ubicacion.emitir(.permiso(.concedido))
+        banco.ubicacion.emitir(banco.rumbo(grados: 45))
+        banco.ubicacion.emitir(banco.posicion(precision: 7))
+        try await banco.responder(FixturesParidad.cercanasMuyCerca)
+        banco.modelo.orientarHacia(centroNombre)
+        banco.modelo.abrirEnMapas(centroNombre)
+        XCTAssertTrue(banco.modelo.refrescoProgramado)
+        XCTAssertNotNil(banco.modelo.mensajeMapas)
+
+        banco.modelo.suspender()
+
+        // Todo vuelve a su sitio.
+        XCTAssertEqual(banco.modelo.estado, .inactivo)
+        XCTAssertNil(banco.modelo.respuesta)
+        XCTAssertNil(banco.modelo.objetivo)
+        XCTAssertNil(banco.modelo.fallo)
+        XCTAssertNil(banco.modelo.aviso)
+        XCTAssertNil(banco.modelo.mensajeMapas)
+        XCTAssertNil(banco.modelo.posicionEnMapa)
+        XCTAssertNil(banco.modelo.precisionMetros)
+        XCTAssertFalse(banco.modelo.consultando)
+        XCTAssertFalse(banco.modelo.refrescoProgramado)
+        XCTAssertFalse(banco.modelo.escuchando)
+        XCTAssertEqual(banco.modelo.rumbo, .sinLectura)
+        XCTAssertFalse(banco.ubicacion.hayOyente)
+
+        // Otra sesión, sin arrastrar nada de la anterior ni esperar el intervalo.
+        banco.reloj.avanzar(1_000)
+        banco.modelo.iniciar()
+        XCTAssertEqual(banco.modelo.estado, .pidiendoPermiso)
+        banco.ubicacion.emitir(.permiso(.concedido))
+        banco.ubicacion.emitir(banco.posicion(precision: 30))
+        await banco.cliente.cercanas.esperar(2)
+        let lectura = banco.cliente.lecturas[1]
+        XCTAssertNil(lectura.rumbo, "el rumbo de la sesión anterior no se conserva")
+        XCTAssertEqual(lectura.precision, 30)
+        XCTAssertFalse(banco.modelo.refrescoProgramado, "ninguna estación elegida: no hay refresco")
+        try await banco.responder(FixturesParidad.cercanasMuyCerca)
+        XCTAssertEqual(banco.ubicacion.iniciados, 2)
+
+        // La cercanía se puede volver a decir en la sesión nueva (el «ya dicho» tampoco se conserva).
+        let antes = banco.locutor.dichos.filter { $0.contains("Estás muy cerca de") }.count
+        banco.modelo.orientarHacia(centroNombre)
+        XCTAssertEqual(banco.locutor.dichos.filter { $0.contains("Estás muy cerca de") }.count, antes + 1)
+    }
+
+    func testSuspenderCancelaElRefrescoDeVerdadYSePuedeVolverAElegirDespues() async throws {
+        let banco = Banco()
+        try await conEstacionElegida(banco)
+        banco.modelo.suspender()
+        banco.reloj.avanzar(GpsAuditivoModelo.intervaloRefrescoMs * 3)
+        await dejarPasar(60)
+        XCTAssertEqual(banco.peticiones, 1)
+
+        banco.activar()
+        try await banco.responder(FixturesParidad.cercanasRelativa)
+        banco.modelo.orientarHacia(norteNombre)
+        XCTAssertTrue(banco.modelo.refrescoProgramado)
+        banco.reloj.avanzar(GpsAuditivoModelo.intervaloRefrescoMs)
+        banco.ubicacion.emitir(banco.posicion())
+        await banco.cliente.cercanas.esperar(3)
+        XCTAssertEqual(banco.peticiones, 3, "la primera sesión, la segunda y su refresco")
+    }
+
+    // MARK: Abrir en Mapas
+
+    func testAbrirEnMapasSoloEntregaElDestinoDeLaEstacionYNuncaLaPosicionDeLaPersona() async throws {
+        let banco = Banco()
+        banco.activar()
+        try await banco.responder(FixturesParidad.cercanasRelativa)
+        banco.modelo.abrirEnMapas(centroNombre)
+
+        XCTAssertEqual(banco.abridor.aperturas.count, 1)
+        XCTAssertEqual(banco.abridor.aperturas[0].nombre, centroNombre)
+        XCTAssertEqual(banco.abridor.aperturas[0].coordenada, Coordenada(latitud: 4.6504, longitud: -74.0851), "la de la estación (catálogo)")
+        let persona = Coordenada(latitud: 4.6124, longitud: -74.0935)
+        XCTAssertNotEqual(banco.abridor.aperturas[0].coordenada, persona)
+        XCTAssertEqual(banco.modelo.mensajeMapas, TextoGps.abriMapas(centroNombre))
+        XCTAssertEqual(banco.locutor.dichos.last, "Abrí una ruta a pie aproximada hacia Estación Ejemplo Centro en Mapas. La accesibilidad del acceso no está verificada.")
+        XCTAssertTrue(TextoGps.notaMapas.contains("aproximada"))
+        XCTAssertTrue(TextoGps.notaMapas.contains("accesibilidad del acceso no está verificada"))
+    }
+
+    func testAbrirEnMapasSoloConUnaEstacionDeLaListaVigente() async throws {
+        let banco = Banco()
+        banco.modelo.abrirEnMapas(centroNombre) // sin sesión
+        banco.activar()
+        try await banco.responder(FixturesParidad.cercanasRelativa)
+        banco.modelo.abrirEnMapas("Estación que no existe")
+        XCTAssertTrue(banco.abridor.aperturas.isEmpty)
+        banco.reloj.avanzar(60_001)
+        await esperarHasta("que venza la lectura") { banco.modelo.estado == .vencida }
+        banco.modelo.abrirEnMapas(centroNombre) // la lista de una posición vencida ya no está
+        XCTAssertTrue(banco.abridor.aperturas.isEmpty)
     }
 }

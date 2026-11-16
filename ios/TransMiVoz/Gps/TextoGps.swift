@@ -43,6 +43,10 @@ enum TextoGps {
     static let rumboNoDisponible = "Este iPhone no tiene brújula: no envío rumbo al servidor."
     static let rumboSinLectura =
         "Todavía no hay una lectura de brújula con el norte verdadero: no envío rumbo al servidor."
+    static let abrirEnMapas = "Abrir en Mapas"
+    static let notaMapas =
+        "Ruta a pie aproximada hasta el punto de la estación en la app Mapas, que parte de donde estás; la accesibilidad del acceso no está verificada."
+    static let vozOcupada = "Suena otro aviso: lo que ibas a oír queda en pantalla. Vuelve a pedirlo cuando termine."
     static let limiteDeOrientacion = "Es una orientación aproximada: la accesibilidad del acceso no está verificada."
 
     static func ubicacionLista(_ estacion: EstacionCercana) -> String {
@@ -61,6 +65,11 @@ enum TextoGps {
     /// una referencia aproximada: no promete llegada ni un acceso accesible.
     static func muyCerca(_ estacion: EstacionCercana) -> String {
         "Estás muy cerca de \(estacion.nombre), a unos \(estacion.distanciaHablada). Busca el acceso de la estación; el punto es una referencia aproximada, no un acceso verificado."
+    }
+
+    /// Lo que dice la web al abrir la ruta en Google Maps, con la app Mapas del sistema.
+    static func abriMapas(_ nombre: String) -> String {
+        "Abrí una ruta a pie aproximada hacia \(nombre) en Mapas. La accesibilidad del acceso no está verificada."
     }
 
     static func fueraDeLasMasCercanas(_ nombre: String) -> String {

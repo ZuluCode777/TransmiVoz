@@ -28,14 +28,33 @@ final class UbicacionFalsa: ProveedorUbicacion {
     var hayOyente: Bool { alEvento != nil }
 }
 
-/// Locutor que anota lo que se dijo y cuántas veces se cortó lo propio.
+/// Locutor que anota lo que se dijo y cuántas veces se cortó lo propio. `resultado` es lo que contesta a cada frase: la prueba
+/// lo cambia para simular que suena otro aviso (`.ocupada`) o que la voz está apagada (`.silenciada`).
 @MainActor
 final class LocutorFalso: Locutor {
     private(set) var dichos: [String] = []
+    /// Si cada frase pidió anunciarse con VoiceOver cuando la voz calla.
+    private(set) var anunciosConVoiceOver: [Bool] = []
     private(set) var cortes = 0
+    var resultado: ResultadoLocucion = .hablada
 
-    func decir(_ texto: String) { dichos.append(texto) }
+    func decir(_ texto: String, anunciarConVoiceOver: Bool) -> ResultadoLocucion {
+        dichos.append(texto)
+        anunciosConVoiceOver.append(anunciarConVoiceOver)
+        return resultado
+    }
+
     func cortarLoPropio() { cortes += 1 }
+}
+
+/// Mapas del sistema de mentira: anota a qué estación se pidió la ruta, y solo eso (no recibe ninguna otra coordenada).
+@MainActor
+final class AbridorFalso: AbridorMapas {
+    private(set) var aperturas: [(nombre: String, coordenada: Coordenada)] = []
+
+    func abrirRutaAPie(haciaEstacion nombre: String, en coordenada: Coordenada) {
+        aperturas.append((nombre, coordenada))
+    }
 }
 
 /// Espera, sin dormir de más, a que se cumpla algo que ocurre en otra tarea (hasta ~5 s).

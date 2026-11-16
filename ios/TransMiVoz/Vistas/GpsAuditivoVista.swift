@@ -17,6 +17,7 @@ struct GpsAuditivoVista: View {
     @Environment(\.openURL) private var abrirURL
     @AccessibilityFocusState private var foco: ZonaFocoGps?
 
+    /// El modelo compartido de la app. La raíz lo suspende al cambiar de pestaña o ir a segundo plano; esta pantalla también.
     private var modelo: GpsAuditivoModelo { servicios.gps }
 
     var body: some View {
@@ -155,6 +156,9 @@ struct GpsAuditivoVista: View {
                     fila(modelo, indice: indice, estacion: estacion)
                 }
             }
+            if let mapas = modelo.mensajeMapas {
+                Text(mapas).accessibilityIdentifier("gps-mapas-aviso")
+            }
             CatalogoVista(catalogo: respuesta.catalogo, alVolverAConsultar: { modelo.actualizar() })
         }
     }
@@ -169,9 +173,21 @@ struct GpsAuditivoVista: View {
             }
             .accessibilityElement(children: .combine)
             .accessibilityIdentifier("gps-estacion-\(indice)")
+            // El aviso de cercanía de la web, también en texto: lo decide el servidor (`muyCerca`) y solo para la estación elegida.
+            if elegida && estacion.muyCerca {
+                Text(TextoGps.muyCerca(estacion)).font(.subheadline.bold()).accessibilityIdentifier("gps-muy-cerca-\(indice)")
+            }
             Button(TextoGps.orientarme) { modelo.orientarHacia(estacion.nombre) }
                 .buttonStyle(EstiloBotonSecundario())
                 .accessibilityIdentifier("gps-orientar-\(indice)")
+            // La ruta a pie en la app Mapas (equivalente a «Abrir en Google Maps»): solo recibe el destino, la estación.
+            Button(TextoGps.abrirEnMapas) { modelo.abrirEnMapas(estacion.nombre) }
+                .buttonStyle(EstiloBotonSecundario())
+                .accessibilityIdentifier("gps-mapas-\(indice)")
+            Text(TextoGps.notaMapas)
+                .font(.footnote)
+                .foregroundStyle(.textoSecundario)
+                .accessibilityIdentifier("gps-nota-mapas-\(indice)")
         }
         .tarjetaWeb()
     }

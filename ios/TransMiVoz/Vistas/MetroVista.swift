@@ -22,7 +22,8 @@ private struct MetroPantalla: View {
 
     init(servicios: ServiciosRutas) {
         self.servicios = servicios
-        _modelo = State(initialValue: MetroModelo(cliente: servicios.cliente))
+        // La voz es la compartida de la app (`ControlVoz`), la del Locutor del GPS: una sola.
+        _modelo = State(initialValue: MetroModelo(cliente: servicios.cliente, locutor: servicios.gps.locutor))
     }
 
     var body: some View {
@@ -88,6 +89,19 @@ private struct MetroPantalla: View {
         .tarjetaWeb()
         .accessibilityIdentifier("metro-estado")
 
+        if modelo.puedeRepetirEstado {
+            Button { modelo.repetirEstado() } label: {
+                Label(TextoMetro.repetirEstado, systemImage: "speaker.wave.2")
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.large)
+            .frame(minHeight: 44)
+            .accessibilityIdentifier("metro-repetir")
+            if let aviso = modelo.avisoVoz {
+                Text(aviso).accessibilityIdentifier("metro-aviso-voz")
+            }
+        }
+
         mapaYAtribucion(r)
         estaciones(r)
         lineaDos(r)
@@ -99,7 +113,14 @@ private struct MetroPantalla: View {
             Text(TextoMetro.encabezadoMapa).font(.title3.bold()).accessibilityAddTraits(.isHeader)
             // El rótulo y la atribución completa van junto al mapa y no se ocultan.
             Text(r.mapa.rotulo).font(.subheadline.bold()).accessibilityIdentifier("metro-rotulo")
-            MapaMetroVista(capa: CapaMetro(r), resaltada: modelo.resaltada, modoPruebas: servicios.modoPruebas)
+            MapaMetroVista(
+                capa: CapaMetro(r), resaltada: modelo.resaltada, modoPruebas: servicios.modoPruebas,
+                alTocarHuella: { huella in
+                    modelo.resaltar(huella.id)
+                    AccessibilityNotification.Announcement(huella.etiqueta).post()
+                },
+                alTocarTrazado: { AccessibilityNotification.Announcement(r.mapa.rotulo).post() })
+            Text(TextoMetro.toqueEnElMapa).font(.footnote).foregroundStyle(.textoSecundario)
             if let resaltada = modelo.resaltada, let estacion = r.estaciones.first(where: { $0.id == resaltada }) {
                 Text(TextoMetro.huellaResaltada(estacion.etiquetaHuella)).accessibilityIdentifier("metro-huella-resaltada")
             }
