@@ -114,6 +114,27 @@ final class TransMiVozMetroUITests: ParidadUITestCase {
         exponer("metro-fuente-F1")
     }
 
+    func testRepetirElEstadoEnVozAltaEsUnBotonDe44PuntosYExplicaSiLaVozNoEstaActiva() throws {
+        lanzar()
+        abrirMetro()
+        XCTAssertTrue(elemento("metro-estado").waitForExistence(timeout: 10))
+        comprobarTocable("metro-repetir")
+        elemento("metro-repetir").tap()
+        // En las pruebas la voz de la app es de mentira (sin salida privada): se dice por qué no se oyó, y la nota sigue en pantalla.
+        let aviso = elemento("metro-aviso-voz")
+        XCTAssertTrue(aviso.waitForExistence(timeout: 10))
+        XCTAssertTrue(aviso.label.contains("VoiceOver"), aviso.label)
+        XCTAssertTrue(elemento("metro-estado").label.contains("en construcción y sin servicio comercial"))
+    }
+
+    func testElMapaDiceComoTocarUnaHuellaYLaListaSigueCompleta() throws {
+        lanzar()
+        abrirMetro()
+        XCTAssertTrue(elemento("metro-estado").waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["Toca una huella del mapa para saber qué estación es; la lista de abajo tiene todas."].exists)
+        for id in estaciones { XCTAssertTrue(elemento("metro-estacion-\(id)").exists) }
+    }
+
     func testUnaEstacionSeAbreYSuHuellaSeResaltaEnElMapa() throws {
         lanzar()
         abrirMetro()
@@ -244,6 +265,50 @@ final class TransMiVozGpsUITests: ParidadUITestCase {
         XCTAssertFalse(elemento("gps-estacion-0").label.contains("Orientando"))
     }
 
+    func testAbrirEnMapasEsUnBotonPorEstacionConSuAvisoDeRutaAproximadaYSinAbrirNadaEnLasPruebas() throws {
+        activar()
+        XCTAssertTrue(elemento("gps-estacion-0").waitForExistence(timeout: 15))
+        for indice in 0..<4 {
+            XCTAssertTrue(elemento("gps-mapas-\(indice)").exists, "falta «Abrir en Mapas» de la estación \(indice)")
+            let nota = elemento("gps-nota-mapas-\(indice)")
+            XCTAssertTrue(nota.exists)
+            XCTAssertTrue(nota.label.contains("aproximada"), nota.label)
+            XCTAssertTrue(nota.label.contains("accesibilidad del acceso no está verificada"), nota.label)
+        }
+        comprobarTocable("gps-mapas-0")
+        XCTAssertEqual(elemento("gps-mapas-0").label, "Abrir en Mapas")
+        elemento("gps-mapas-0").tap()
+        let aviso = elemento("gps-mapas-aviso")
+        XCTAssertTrue(aviso.waitForExistence(timeout: 10))
+        XCTAssertTrue(aviso.label.contains("Abrí una ruta a pie aproximada hacia Estación Ejemplo Centro en Mapas"), aviso.label)
+        XCTAssertTrue(aviso.label.contains("La accesibilidad del acceso no está verificada"), aviso.label)
+        XCTAssertTrue(app.state == .runningForeground, "en las pruebas no se sale de la app para abrir Mapas")
+    }
+
+    func testElAvisoDeCercaniaEnTextoSoloSaleParaLaEstacionElegidaYSiElServidorLoMarca() throws {
+        activar(["-PRUEBAS_UI_GPS_MUY_CERCA"])
+        XCTAssertTrue(elemento("gps-estacion-0").waitForExistence(timeout: 15))
+        XCTAssertFalse(elemento("gps-muy-cerca-0").exists, "sin elegir la estación no hay aviso, aunque el servidor la marque")
+        comprobarTocable("gps-orientar-0")
+        elemento("gps-orientar-0").tap()
+        let aviso = elemento("gps-muy-cerca-0")
+        XCTAssertTrue(aviso.waitForExistence(timeout: 10))
+        XCTAssertTrue(aviso.label.contains("Estás muy cerca de Estación Ejemplo Centro"), aviso.label)
+        XCTAssertTrue(aviso.label.contains("referencia aproximada, no un acceso verificado"), aviso.label)
+        XCTAssertFalse(elemento("gps-muy-cerca-1").exists)
+    }
+
+    func testSinElIndicadorDelServidorLaEstacionElegidaNoMuestraAvisoDeCercania() throws {
+        activar()
+        XCTAssertTrue(elemento("gps-estacion-0").waitForExistence(timeout: 15))
+        exponer("gps-orientar-0")
+        elemento("gps-orientar-0").tap()
+        let marcada = NSPredicate(format: "label CONTAINS %@", "Orientando")
+        expectation(for: marcada, evaluatedWith: elemento("gps-estacion-0"))
+        waitForExpectations(timeout: 10)
+        XCTAssertFalse(elemento("gps-muy-cerca-0").exists)
+    }
+
     func testDetenerLaUbicacionBorraLasEstacionesYSeVuelveAPedirConElBoton() throws {
         activar()
         XCTAssertTrue(elemento("gps-estacion-0").waitForExistence(timeout: 15))
@@ -349,7 +414,9 @@ final class TransMiVozGpsUITests: ParidadUITestCase {
     func testLosControlesMidenAlMenos44Puntos() throws {
         activar()
         XCTAssertTrue(elemento("gps-estacion-0").waitForExistence(timeout: 15))
-        for id in ["gps-detener", "gps-repetir", "gps-actualizar", "gps-orientar-0", "gps-orientar-3"] { comprobarTocable(id) }
+        for id in ["gps-detener", "gps-repetir", "gps-actualizar", "gps-orientar-0", "gps-orientar-3", "gps-mapas-0", "gps-mapas-3"] {
+            comprobarTocable(id)
+        }
     }
 
     func testAuditoriaAccesibilidadGpsInactivo() throws {
@@ -386,6 +453,6 @@ final class TransMiVozGpsTextoGrandeUITests: ParidadUITestCase {
         elemento("gps-activar").tap()
         XCTAssertTrue(elemento("gps-estacion-0").waitForExistence(timeout: 15))
         try auditar("gps-texto-grande")
-        for id in ["gps-detener", "gps-repetir", "gps-orientar-0", "gps-orientar-3"] { exponer(id) }
+        for id in ["gps-detener", "gps-repetir", "gps-orientar-0", "gps-mapas-0", "gps-orientar-3", "gps-mapas-3"] { exponer(id) }
     }
 }

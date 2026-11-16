@@ -22,6 +22,12 @@ enum TextoMetro {
     static let servidorAnterior =
         "Este servidor todavía no tiene el Metro de la Línea 1 (respondió 400). Es una versión anterior del servidor: pide que lo actualicen. Sin él no puedo mostrar el listado."
 
+    static let repetirEstado = "Repetir el estado en voz alta"
+    static let vozOcupada = "Suena otro aviso: el estado queda en pantalla. Vuelve a pulsar «Repetir» cuando termine."
+    static let vozApagada =
+        "La voz de la app no está activa (VoiceOver activo, sin auriculares o apagada en Preferencias): el estado queda en pantalla y VoiceOver lo lee."
+    static let toqueEnElMapa = "Toca una huella del mapa para saber qué estación es; la lista de abajo tiene todas."
+
     static func etiquetaMapa(rotulo: String) -> String { "Mapa ilustrativo. \(rotulo)" }
 
     static func huellaResaltada(_ etiqueta: String) -> String { "Resaltada en el mapa: \(etiqueta)." }

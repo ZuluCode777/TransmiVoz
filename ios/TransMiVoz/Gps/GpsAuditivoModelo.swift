@@ -12,11 +12,15 @@ import Observation
 /// - la ubicación solo se escucha tras `iniciar()` y se suelta con `detener()`; al salir de la pantalla, bloquear el
 ///   iPhone o pasar a segundo plano se detiene sola (`suspender()`) y NO se reanuda sola: la persona la vuelve a pedir;
 /// - ningún evento del sensor dispara una petición. Hay petición solo con la primera lectura, «Actualizar estaciones»,
-///   «Repetir indicación» y «Oriéntame por voz», todas con un intervalo mínimo entre una y otra (el servidor comparte
-///   60 peticiones por minuto entre todos los teléfonos y todas las operaciones). Solo hay una en curso: pedir otra la reemplaza;
+///   «Repetir indicación» y «Oriéntame por voz», y, MIENTRAS haya una estación elegida, un refresco automático cada 20 s
+///   (el aviso de cercanía de la web se evalúa a cada lectura; aquí, a cada refresco). Todas con un intervalo mínimo entre una
+///   y otra y una sola en curso (el servidor comparte 60 peticiones por minuto entre todos los teléfonos y todas las
+///   operaciones). El refresco automático nunca reintenta tras un fallo de red;
 /// - una lectura de más de 60 s está vencida: no se envía ni se presenta como actual;
 /// - la posición, el rumbo y las estaciones viven solo en memoria y se borran al detener. No se guardan, no se registran,
-///   no van en una URL y no se imprimen.
+///   no van en una URL y no se imprimen;
+/// - el modelo es REUTILIZABLE: `suspender()` lo deja del todo en `.inactivo` (sin temporizadores ni elección) y un `iniciar()`
+///   posterior empieza limpio. `EntornoApp` lo crea una sola vez y la raíz lo suspende al cambiar de pestaña o ir a segundo plano.
 @MainActor
 @Observable
 final class GpsAuditivoModelo {
@@ -25,6 +29,10 @@ final class GpsAuditivoModelo {
     /// Mínimo entre dos peticiones y vigencia de la última respuesta para repetirla sin pedir otra. Propuesta de software,
     /// sin medir: deja a un teléfono en 6 por minuto como mucho, con margen bajo el tope compartido de 60 por minuto.
     static let intervaloMinimoMs: Milisegundos = 10_000
+    /// Cada cuánto se refresca sola la consulta MIENTRAS haya una estación elegida, contado desde la última petición (manual o
+    /// automática): para que «Estás muy cerca» pueda salir sin tocar nada. Como mucho 3 por minuto por teléfono además de las
+    /// manuales, y todas bajo el mínimo de arriba: 6 por minuto en total, 18 con tres teléfonos. Propuesta de software, sin medir.
+    static let intervaloRefrescoMs: Milisegundos = 20_000
 
     enum Estado: Equatable {
         case inactivo
@@ -51,6 +59,8 @@ final class GpsAuditivoModelo {
     /// Por qué se consulta: decide qué se dice con la respuesta.
     enum Accion: Equatable {
         case primera, actualizar, repetir, orientar
+        /// El refresco periódico de la estación elegida: solo habla si hay algo que decir (cercanía o estación que ya no está).
+        case automatica
     }
 
     private(set) var estado: Estado = .inactivo
@@ -65,6 +75,8 @@ final class GpsAuditivoModelo {
     /// Resultado de la última acción en texto (espera, ubicación vencida, permiso…), para la pantalla.
     private(set) var aviso: String?
     private(set) var rumbo: EstadoRumbo = .sinLectura
+    /// Lo que se dijo al abrir la ruta a pie en Mapas (también queda en pantalla); `nil` si no se abrió.
+    private(set) var mensajeMapas: String?
     /// Precisión de la lectura vigente, solo para mostrarla.
     private(set) var precisionMetros: Double?
     /// Dónde está la persona, solo para el mapa. Se borra al detener o al vencer.
@@ -72,7 +84,9 @@ final class GpsAuditivoModelo {
 
     @ObservationIgnored private let cliente: ClientePlanificador
     @ObservationIgnored private let proveedor: ProveedorUbicacion
-    @ObservationIgnored private let locutor: Locutor
+    /// La voz compartida de la app: la de esta pantalla y la de «Metro de Bogotá».
+    @ObservationIgnored let locutor: Locutor
+    @ObservationIgnored private let abridor: AbridorMapas
     @ObservationIgnored private let reloj: RelojMonotonico
     @ObservationIgnored private let dormir: @Sendable (Milisegundos) async throws -> Void
     @ObservationIgnored private let ejecutor = EjecutorUnico()
@@ -80,6 +94,8 @@ final class GpsAuditivoModelo {
     @ObservationIgnored private var posicion: PosicionMedida?
     @ObservationIgnored private var rumboMedido: RumboMedido?
     @ObservationIgnored private var vencimiento: Task<Void, Never>?
+    /// El refresco automático de la estación elegida; `nil` si no hay ninguno programado.
+    @ObservationIgnored private var refresco: Task<Void, Never>?
     @ObservationIgnored private var ultimaPeticionMs: Milisegundos?
     @ObservationIgnored private var accionEnCurso: Accion = .primera
     /// Si la lectura de la última consulta llevaba rumbo: una respuesta sin él no se repite cuando ya hay brújula.
@@ -91,6 +107,7 @@ final class GpsAuditivoModelo {
 
     init(
         cliente: ClientePlanificador, proveedor: ProveedorUbicacion, locutor: Locutor,
+        abridor: AbridorMapas = AbridorMapasSistema(),
         reloj: @escaping RelojMonotonico = RelojDelSistema.ahora,
         dormir: @escaping @Sendable (Milisegundos) async throws -> Void = { ms in
             try await Task.sleep(nanoseconds: UInt64(max(ms, 1)) * 1_000_000)
@@ -99,6 +116,7 @@ final class GpsAuditivoModelo {
         self.cliente = cliente
         self.proveedor = proveedor
         self.locutor = locutor
+        self.abridor = abridor
         self.reloj = reloj
         self.dormir = dormir
         rumbo = proveedor.rumboDisponible ? .sinLectura : .noDisponible
@@ -109,6 +127,9 @@ final class GpsAuditivoModelo {
         guard let objetivo else { return nil }
         return respuesta?.estaciones.first { $0.nombre == objetivo }
     }
+
+    /// Hay un refresco automático programado (solo con ubicación vigente, estación elegida y sin fallo).
+    var refrescoProgramado: Bool { refresco != nil }
 
     /// Hay ubicación pedida (con o sin lectura todavía): lo que se debe soltar al irse.
     var escuchando: Bool {
@@ -146,18 +167,22 @@ final class GpsAuditivoModelo {
         ejecutor.invalidar()
         vencimiento?.cancel()
         vencimiento = nil
+        cancelarRefresco()
         locutor.cortarLoPropio()
         posicion = nil
         rumboMedido = nil
         posicionEnMapa = nil
         precisionMetros = nil
         ultimaPeticionMs = nil
+        accionEnCurso = .primera
+        consultaLlevabaRumbo = false
         consultaInicialPendiente = true
         cercaniaDicha = false
         if habiaSesion {
             limpiarConsulta()
             objetivo = nil
             aviso = nil
+            mensajeMapas = nil
             estado = .inactivo
             rumbo = proveedor.rumboDisponible ? .sinLectura : .noDisponible
         }
@@ -210,12 +235,14 @@ final class GpsAuditivoModelo {
         ejecutor.invalidar()
         vencimiento?.cancel()
         vencimiento = nil
+        cancelarRefresco()
         posicion = nil
         rumboMedido = nil
         posicionEnMapa = nil
         precisionMetros = nil
         limpiarConsulta()
         objetivo = nil
+        mensajeMapas = nil
         estado = nuevo
         aviso = texto
         locutor.decir(texto)
@@ -268,6 +295,7 @@ final class GpsAuditivoModelo {
         guard estado == .activo else { return }
         ejecutor.invalidar()
         vencimiento = nil
+        cancelarRefresco()
         posicion = nil
         posicionEnMapa = nil
         precisionMetros = nil
@@ -288,6 +316,54 @@ final class GpsAuditivoModelo {
         if objetivo != nombre { cercaniaDicha = false }
         objetivo = nombre
         pedir(.orientar)
+        programarRefresco()
+    }
+
+    /// «Abrir en Mapas»: la ruta a pie hacia la estación en la app Mapas del sistema (como «Abrir en Google Maps» de la web). Solo
+    /// recibe la estación: nombre y coordenada del catálogo. La posición de la persona no sale de aquí: va al destino y a nadie más.
+    func abrirEnMapas(_ nombre: String) {
+        guard estado == .activo, let estacion = respuesta?.estaciones.first(where: { $0.nombre == nombre }) else { return }
+        abridor.abrirRutaAPie(haciaEstacion: estacion.nombre, en: estacion.coordenada)
+        let texto = TextoGps.abriMapas(estacion.nombre)
+        mensajeMapas = texto
+        locutor.decir(texto)
+    }
+
+    // MARK: Refresco automático de la estación elegida
+
+    private func cancelarRefresco() {
+        refresco?.cancel()
+        refresco = nil
+    }
+
+    /// Mientras haya una estación elegida, ubicación vigente y ningún fallo, pide la consulta de nuevo cada 20 s desde la última
+    /// petición. Ningún evento del sensor pasa por aquí: solo este temporizador, que se cancela al detener, vencer la lectura,
+    /// soltar la estación o fallar una consulta (un fallo no se reintenta solo).
+    private func programarRefresco() {
+        cancelarRefresco()
+        guard estado == .activo, objetivo != nil, fallo == nil else { return }
+        refresco = Task { [weak self, dormir] in
+            while !Task.isCancelled {
+                guard let restante = self?.msHastaRefresco() else { return }
+                if restante <= 0 {
+                    self?.refrescarSola()
+                    return
+                }
+                do { try await dormir(restante) } catch { return }
+            }
+        }
+    }
+
+    private func msHastaRefresco() -> Milisegundos? {
+        guard estado == .activo, objetivo != nil, fallo == nil, let ultima = ultimaPeticionMs else { return nil }
+        return ultima + Self.intervaloRefrescoMs - reloj()
+    }
+
+    private func refrescarSola() {
+        refresco = nil
+        // Con otra petición en curso no se encola nada: al terminar bien, `aplicar` retoma el ciclo.
+        guard estado == .activo, objetivo != nil, fallo == nil, !consultando else { return }
+        pedir(.automatica)
     }
 
     /// Una respuesta reciente se vuelve a decir sin pedir otra; si no, se consulta. «Actualizar» siempre consulta.
@@ -303,8 +379,8 @@ final class GpsAuditivoModelo {
         }
         let enEspera = ultimaPeticionMs.map { reloj() - $0 < Self.intervaloMinimoMs } ?? false
         if enEspera {
-            // La primera consulta bloqueada no avisa: la próxima lectura la reintenta cuando pase el intervalo.
-            guard accion != .primera else { return }
+            // La primera consulta y el refresco bloqueados no avisan: la próxima lectura o el próximo ciclo lo reintentan.
+            guard accion != .primera, accion != .automatica else { return }
             if accion != .actualizar, let respuesta, consultaLlevabaRumbo == (rumboMedido != nil) {
                 hablar(accion, con: respuesta)
             } else {
@@ -335,6 +411,7 @@ final class GpsAuditivoModelo {
             case .failure(let error):
                 self.respuesta = nil
                 fallo = error
+                cancelarRefresco() // un fallo no se reintenta solo: lo reanuda la persona con «Reintentar»
             }
         }
     }
@@ -347,6 +424,7 @@ final class GpsAuditivoModelo {
             return
         }
         hablar(accionEnCurso, con: respuesta)
+        programarRefresco()
     }
 
     /// La lectura que viaja al servidor: lo que el sistema midió, sin reglas. Una lectura vencida no se envía; la precisión o la
@@ -370,7 +448,9 @@ final class GpsAuditivoModelo {
     // MARK: Voz
 
     /// Dice lo que el servidor devolvió. Una sola frase por vez (la voz es de cola de uno): la orientación y, si el servidor
-    /// marca `muyCerca` en la estación elegida y todavía no se dijo, el aviso de cercanía.
+    /// marca `muyCerca` en la estación elegida y todavía no se dijo, el aviso de cercanía. Si suena otra cosa (un aviso del
+    /// accesorio) la frase no se dice y queda en pantalla; la cercanía solo se da por dicha si llegó a la persona, así que el
+    /// próximo refresco la vuelve a intentar.
     private func hablar(_ accion: Accion, con respuesta: RespuestaEstacionesCercanas) {
         var frases: [String] = []
         let elegida = objetivo.flatMap { nombre in respuesta.estaciones.first { $0.nombre == nombre } }
@@ -384,15 +464,27 @@ final class GpsAuditivoModelo {
         case .orientar:
             if let elegida {
                 frases.append(TextoGps.orientandoHacia(elegida))
-            } else if let nombre = objetivo {
-                objetivo = nil
-                frases.append(TextoGps.fueraDeLasMasCercanas(nombre))
+            } else {
+                soltarEstacionQueYaNoEsta(&frases)
             }
+        case .automatica:
+            if elegida == nil { soltarEstacionQueYaNoEsta(&frases) }
         }
+        var diceLaCercania = false
         if let elegida, elegida.muyCerca, !cercaniaDicha {
-            cercaniaDicha = true
+            diceLaCercania = true
             frases.append(TextoGps.muyCerca(elegida))
         }
-        if !frases.isEmpty { locutor.decir(frases.joined(separator: " ")) }
+        guard !frases.isEmpty else { return }
+        let resultado = locutor.decir(frases.joined(separator: " "))
+        if diceLaCercania && resultado.seDijo { cercaniaDicha = true }
+        if resultado == .ocupada && accion != .automatica { aviso = TextoGps.vozOcupada }
+    }
+
+    /// La estación elegida ya no está entre las más cercanas: se suelta (y con ella el refresco) y se dice.
+    private func soltarEstacionQueYaNoEsta(_ frases: inout [String]) {
+        guard let nombre = objetivo else { return }
+        objetivo = nil
+        frases.append(TextoGps.fueraDeLasMasCercanas(nombre))
     }
 }

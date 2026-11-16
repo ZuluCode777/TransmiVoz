@@ -8,18 +8,26 @@ import SwiftUI
 /// la distancia y orienta: aquí no hay ninguna regla de transporte. Cada estación se lee en el listado (el mapa es una ayuda
 /// visual) y la voz es la de `ControlVoz`, la misma de los avisos del accesorio.
 ///
-/// `voz`: la `ControlVoz` de la app. Sin ella, lo hablado se anuncia con VoiceOver y queda en pantalla.
+/// Los servicios los entrega quien abre la pantalla (`GpsAuditivoVista(servicios:)`): el modelo es `servicios.gps`, uno solo
+/// para toda la app, y la voz es la `ControlVoz` de `EntornoApp` (la de los avisos del accesorio y la consulta).
 struct GpsAuditivoVista: View {
-    @Environment(\.serviciosRutas) private var servicios
-    let voz: ControlVoz?
+    @Environment(\.serviciosRutas) private var delEntorno
+    private let explicitos: ServiciosRutas?
 
-    init(voz: ControlVoz? = nil) {
-        self.voz = voz
+    /// Los servicios de la app, entregados por quien abre la pantalla. Es el contrato con la raíz.
+    init(servicios: ServiciosRutas) {
+        explicitos = servicios
+    }
+
+    /// PROVISIONAL: `InicioVista` de la base todavía abre `GpsAuditivoVista()`. Se borra, con `delEntorno` y el `if let` de
+    /// abajo, cuando Inicio llame a `GpsAuditivoVista(servicios:)`.
+    init() {
+        explicitos = nil
     }
 
     var body: some View {
-        if let servicios {
-            GpsAuditivoPantalla(servicios: servicios, voz: voz)
+        if let servicios = explicitos ?? delEntorno {
+            GpsAuditivoPantalla(servicios: servicios)
         } else {
             // Sin servicios no hay cliente: solo pasa fuera de la app (vistas previas).
             Text(TextoMetro.servidorNoConfigurado).padding(16)
@@ -29,49 +37,35 @@ struct GpsAuditivoVista: View {
 
 private struct GpsAuditivoPantalla: View {
     let servicios: ServiciosRutas
-    let voz: ControlVoz?
 
-    @State private var modelo: GpsAuditivoModelo?
     @Environment(\.scenePhase) private var faseEscena
     @Environment(\.openURL) private var abrirURL
     @AccessibilityFocusState private var foco: ZonaFocoGps?
+
+    /// El modelo compartido de la app. La raíz lo suspende al cambiar de pestaña o ir a segundo plano; esta pantalla también.
+    private var modelo: GpsAuditivoModelo { servicios.gps }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 EncabezadoPantalla(titulo: TextoGps.titulo, subtitulo: TextoGps.subtitulo, simbolo: "map")
-                if let modelo { contenido(modelo) }
+                contenido(modelo)
             }
             .padding(16)
         }
         .navigationTitle(TextoGps.titulo)
         .navigationBarTitleDisplayMode(.inline)
         .bordeInferiorLegible()
-        .onAppear { if modelo == nil { modelo = crearModelo() } }
         // La ubicación solo está abierta con la pantalla a la vista y la app en primer plano; no se reanuda sola. `.inactive`
         // no la suelta: el aviso de permiso del sistema deja la app inactiva un momento, y bloquear el iPhone pasa a
         // `.background` enseguida.
-        .onDisappear { modelo?.suspender() }
-        .onChange(of: faseEscena) { _, nueva in if nueva == .background { modelo?.suspender() } }
-        .onChange(of: modelo?.fallo) { _, nuevo in
+        .onDisappear { modelo.suspender() }
+        .onChange(of: faseEscena) { _, nueva in if nueva == .background { modelo.suspender() } }
+        .onChange(of: modelo.fallo) { _, nuevo in
             guard let nuevo else { return }
             AccessibilityNotification.Announcement("\(nuevo.mensaje) \(nuevo.recuperacion)").post()
             foco = .error
         }
-    }
-
-    private func crearModelo() -> GpsAuditivoModelo {
-        let proveedor: ProveedorUbicacion
-        #if DEBUG
-        if servicios.modoPruebas {
-            proveedor = UbicacionSintetica(argumentos: ProcessInfo.processInfo.arguments)
-        } else {
-            proveedor = UbicacionCoreLocation()
-        }
-        #else
-        proveedor = UbicacionCoreLocation()
-        #endif
-        return GpsAuditivoModelo(cliente: servicios.cliente, proveedor: proveedor, locutor: LocutorControlVoz(voz: voz))
     }
 
     // MARK: Contenido
@@ -187,6 +181,9 @@ private struct GpsAuditivoPantalla: View {
                     fila(modelo, indice: indice, estacion: estacion)
                 }
             }
+            if let mapas = modelo.mensajeMapas {
+                Text(mapas).accessibilityIdentifier("gps-mapas-aviso")
+            }
             CatalogoVista(catalogo: respuesta.catalogo, alVolverAConsultar: { modelo.actualizar() })
         }
     }
@@ -201,9 +198,21 @@ private struct GpsAuditivoPantalla: View {
             }
             .accessibilityElement(children: .combine)
             .accessibilityIdentifier("gps-estacion-\(indice)")
+            // El aviso de cercanía de la web, también en texto: lo decide el servidor (`muyCerca`) y solo para la estación elegida.
+            if elegida && estacion.muyCerca {
+                Text(TextoGps.muyCerca(estacion)).font(.subheadline.bold()).accessibilityIdentifier("gps-muy-cerca-\(indice)")
+            }
             Button(TextoGps.orientarme) { modelo.orientarHacia(estacion.nombre) }
                 .buttonStyle(EstiloBotonSecundario())
                 .accessibilityIdentifier("gps-orientar-\(indice)")
+            // La ruta a pie en la app Mapas (equivalente a «Abrir en Google Maps»): solo recibe el destino, la estación.
+            Button(TextoGps.abrirEnMapas) { modelo.abrirEnMapas(estacion.nombre) }
+                .buttonStyle(EstiloBotonSecundario())
+                .accessibilityIdentifier("gps-mapas-\(indice)")
+            Text(TextoGps.notaMapas)
+                .font(.footnote)
+                .foregroundStyle(.textoSecundario)
+                .accessibilityIdentifier("gps-nota-mapas-\(indice)")
         }
         .tarjetaWeb()
     }

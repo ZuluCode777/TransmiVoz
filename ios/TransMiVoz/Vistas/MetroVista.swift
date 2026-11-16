@@ -7,10 +7,22 @@ import SwiftUI
 /// planificador de TransMilenio. El catálogo lo pide al servidor (`metro-linea-1`) y se muestra tal cual, con el rótulo y la
 /// atribución (licencia, fecha, cambios) junto al mapa. El listado de las 16 estaciones es completo y no depende del mapa.
 struct MetroVista: View {
-    @Environment(\.serviciosRutas) private var servicios
+    @Environment(\.serviciosRutas) private var delEntorno
+    private let explicitos: ServiciosRutas?
+
+    /// Los servicios de la app, entregados por quien abre la pantalla. Es el contrato con la raíz.
+    init(servicios: ServiciosRutas) {
+        explicitos = servicios
+    }
+
+    /// PROVISIONAL: `InicioVista` de la base todavía abre `MetroVista()`. Se borra, con `delEntorno` y el `if let` de abajo,
+    /// cuando Inicio llame a `MetroVista(servicios:)`.
+    init() {
+        explicitos = nil
+    }
 
     var body: some View {
-        if let servicios {
+        if let servicios = explicitos ?? delEntorno {
             MetroPantalla(servicios: servicios)
         } else {
             // Sin servicios no hay cliente: solo pasa fuera de la app (vistas previas).
@@ -27,7 +39,8 @@ private struct MetroPantalla: View {
 
     init(servicios: ServiciosRutas) {
         self.servicios = servicios
-        _modelo = State(initialValue: MetroModelo(cliente: servicios.cliente))
+        // La voz es la compartida de la app (`ControlVoz`), la del Locutor del GPS: una sola.
+        _modelo = State(initialValue: MetroModelo(cliente: servicios.cliente, locutor: servicios.gps.locutor))
     }
 
     var body: some View {
@@ -93,6 +106,19 @@ private struct MetroPantalla: View {
         .tarjetaWeb()
         .accessibilityIdentifier("metro-estado")
 
+        if modelo.puedeRepetirEstado {
+            Button { modelo.repetirEstado() } label: {
+                Label(TextoMetro.repetirEstado, systemImage: "speaker.wave.2")
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.large)
+            .frame(minHeight: 44)
+            .accessibilityIdentifier("metro-repetir")
+            if let aviso = modelo.avisoVoz {
+                Text(aviso).accessibilityIdentifier("metro-aviso-voz")
+            }
+        }
+
         mapaYAtribucion(r)
         estaciones(r)
         lineaDos(r)
@@ -104,7 +130,14 @@ private struct MetroPantalla: View {
             Text(TextoMetro.encabezadoMapa).font(.title3.bold()).accessibilityAddTraits(.isHeader)
             // El rótulo y la atribución completa van junto al mapa y no se ocultan.
             Text(r.mapa.rotulo).font(.subheadline.bold()).accessibilityIdentifier("metro-rotulo")
-            MapaMetroVista(capa: CapaMetro(r), resaltada: modelo.resaltada, modoPruebas: servicios.modoPruebas)
+            MapaMetroVista(
+                capa: CapaMetro(r), resaltada: modelo.resaltada, modoPruebas: servicios.modoPruebas,
+                alTocarHuella: { huella in
+                    modelo.resaltar(huella.id)
+                    AccessibilityNotification.Announcement(huella.etiqueta).post()
+                },
+                alTocarTrazado: { AccessibilityNotification.Announcement(r.mapa.rotulo).post() })
+            Text(TextoMetro.toqueEnElMapa).font(.footnote).foregroundStyle(.textoSecundario)
             if let resaltada = modelo.resaltada, let estacion = r.estaciones.first(where: { $0.id == resaltada }) {
                 Text(TextoMetro.huellaResaltada(estacion.etiquetaHuella)).accessibilityIdentifier("metro-huella-resaltada")
             }
