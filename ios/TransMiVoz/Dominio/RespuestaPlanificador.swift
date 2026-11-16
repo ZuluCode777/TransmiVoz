@@ -254,7 +254,15 @@ extension PlanViaje: RespuestaPlanificador {
         }
         rutasPorElTrazado = try contenedor.decode([ResumenRuta].self, forKey: .rutasPorElTrazado)
         // Opcional: un servidor sin la entrega de las alternativas, o un viaje sin ellas, no manda la clave.
-        alternativas = try contenedor.decodeIfPresent([AlternativaViaje].self, forKey: .alternativas)?.map(\.codigoRuta) ?? []
+        if contenedor.contains(.alternativas) {
+            alternativas = try contenedor.decode([AlternativaViaje].self, forKey: .alternativas).map(\.codigoRuta)
+            guard !alternativas.isEmpty else {
+                throw DecodingError.dataCorruptedError(
+                    forKey: .alternativas, in: contenedor, debugDescription: "Las alternativas presentes no pueden estar vacías.")
+            }
+        } else {
+            alternativas = []
+        }
         catalogo = try contenedor.decode(ProcedenciaCatalogo.self, forKey: .catalogo)
     }
 }
