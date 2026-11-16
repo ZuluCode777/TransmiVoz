@@ -1,6 +1,6 @@
 # iPhone: asistente de voz de «Ceguera total» (`AgenteTotalVista`)
 
-Issue [#51](https://github.com/ZuluCode777/proyecto-1-APP/issues/51). Es la versión del iPhone de `components/total-agent.tsx`: el Inicio del modo «Ceguera total», con el micrófono como control principal. Esta entrega es **funcional**: el aspecto usa solo los componentes de la base (`ComponentesWeb`) y lo rediseña después otra tarea.
+Especificación funcional: [#45](https://github.com/ZuluCode777/proyecto-1-APP/issues/45) (EA-19, conversación por voz y texto con aclaración y permisos) y [#34](https://github.com/ZuluCode777/proyecto-1-APP/issues/34) (EA-08, cancelar captura, consultas y voz tardías); forma parte de la paridad del iPhone, [#51](https://github.com/ZuluCode777/proyecto-1-APP/issues/51). Es la versión del iPhone de `components/total-agent.tsx`: el Inicio del modo «Ceguera total», con el micrófono como control principal. Esta entrega es **funcional**: el aspecto usa solo los componentes de la base (`ComponentesWeb`) y lo rediseña después otra tarea.
 
 **Sin verificar donde se escribió** (no hay Xcode): la lógica sin SwiftUI (`AgenteTotalModelo`, `ConsultaModelo`) compila y pasa 74 pruebas en `swift:6.2` con `-swift-version 5` (29 nuevas de `AgenteTotalModeloTests`, más `ConsultaModeloTests` y `ConsultaVozTests`). Nada de SwiftUI ni de las pruebas de interfaz se ha compilado ni ejecutado; tampoco VoiceOver, el micrófono ni el audio reales.
 
@@ -18,7 +18,7 @@ Issue [#51](https://github.com/ZuluCode777/proyecto-1-APP/issues/51). Es la vers
 | Aviso de privacidad | `agente-total-privacidad-0…2`, con lo que hace el iPhone: el dictado puede ir a Apple y **no se envía la ubicación**. |
 | Escribir y enviar | `agente-total-campo` y `agente-total-enviar`; el campo se vacía al enviar si la pregunta salió. |
 | Errores recuperables | Se dicen con su recuperación; «Reintentar» (`agente-total-reintentar`) donde `ErrorConsulta.admiteReintento`. |
-| Navegar según la acción | `search` → rutas de la estación; `frequent` → Favoritas; `gps` → Mapa y GPS; `route` → detalle de la ruta. Se abren solas y la voz de esa respuesta sigue sonando. `trip` no abre nada: se presenta como información (sus tramos) y ofrece «Planear un viaje entre dos lugares». |
+| Navegar según la acción | `search` → rutas de la estación; `frequent` → Favoritas; `gps` → Mapa y GPS; `route` → detalle de la ruta. Se abren solas y la voz de esa respuesta sigue sonando mientras la pantalla nueva se ve; si la persona cambia de pestaña, la raíz la corta (`AgenteTotalModelo.alSalirDeInicio`), y solo a ella: un aviso del accesorio que suene no se toca. `trip` no abre nada: se presenta como información (sus tramos) y ofrece «Planear un viaje entre dos lugares». |
 | Otras pantallas | «Otras pantallas»: Buscar rutas, Rutas frecuentes, Mapa y GPS. Son las que la web alcanza desde el asistente; Lupa, Metro y Emergencia no se ofrecen en este modo, como en la web. |
 
 Aclaración de EA-19 intacta: «salgo desde Ricaurte» deja `agente-total-origen-pendiente` («Olvidar origen» disponible) y la pregunta siguiente lleva ese origen, porque es la misma `ConsultaModelo`.

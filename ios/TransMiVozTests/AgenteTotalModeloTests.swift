@@ -275,6 +275,32 @@ final class AgenteTotalModeloTests: XCTestCase {
         XCTAssertNil(banco.agente.destino)
     }
 
+    func testDejarLaPestanaInicioCortaLaVozDeUnaRespuestaQueAbrioUnaPantalla() async {
+        let banco = Banco()
+        let gps = RespuestaAgente(texto: "Voy a abrir el GPS auditivo.", accion: .gps)
+        await banco.preguntar("gps", respuesta: .success(gps))
+        banco.agente.alDesaparecer()  // la pantalla empujada por la respuesta cubre a esta
+        XCTAssertTrue(banco.salida.hablando, "la voz de la respuesta que navega sigue sonando")
+
+        banco.agente.alSalirDeInicio()  // la raíz cambió de pestaña
+        XCTAssertTrue(banco.salida.cortadas.contains("Voy a abrir el GPS auditivo."), "salir de Inicio corta la voz de esa respuesta")
+        XCTAssertFalse(banco.salida.hablando)
+    }
+
+    func testDejarLaPestanaInicioNoCortaUnAvisoDelAccesorio() async {
+        let banco = Banco()
+        let gps = RespuestaAgente(texto: "Voy a abrir el GPS auditivo.", accion: .gps)
+        await banco.preguntar("gps", respuesta: .success(gps))
+        banco.agente.alDesaparecer()
+        // Después de la respuesta habla un aviso del accesorio: la cola de uno ya cortó la respuesta y lo que suena es suyo.
+        banco.voz.anunciar("Aviso del accesorio", prioridad: .urgente)
+        XCTAssertTrue(banco.salida.hablando)
+
+        banco.agente.alSalirDeInicio()
+        XCTAssertFalse(banco.salida.cortadas.contains("Aviso del accesorio"), "un aviso ajeno no se corta")
+        XCTAssertTrue(banco.salida.hablando)
+    }
+
     func testLasOtrasPantallasSeAbrenAMano() {
         let banco = Banco()
         banco.agente.abrir(.rutas(estacion: nil))

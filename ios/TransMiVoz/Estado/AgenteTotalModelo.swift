@@ -241,6 +241,14 @@ final class AgenteTotalModelo {
         consulta.salir()
     }
 
+    /// La persona dejó la pestaña Inicio (la raíz cambió de pestaña) con la pantalla de una respuesta abierta encima: la voz de esa
+    /// respuesta, que `alDesaparecer` dejó sonar mientras la pantalla nueva se veía, ya no tiene a quién hablarle. Corta solo la
+    /// locución propia de la consulta (`ConsultaModelo.salir`): un aviso del accesorio que suene no se toca.
+    func alSalirDeInicio() {
+        navegoPorRespuesta = false
+        consulta.salir()
+    }
+
     /// La persona abre una de las otras pantallas desde la lista de la pantalla.
     func abrir(_ nuevo: DestinoAgenteTotal) {
         navegoPorRespuesta = false

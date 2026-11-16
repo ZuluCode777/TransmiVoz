@@ -43,7 +43,7 @@ struct InicioVista: View {
     @ViewBuilder private var contenido: some View {
         switch entorno.modo.modo {
         case .parcial: baldosas
-        case .total: AgenteTotalVista(consulta: entorno.consulta)
+        case .total: AgenteTotalVista(consulta: entorno.consulta, inicioVisible: pestana == .inicio)
         }
     }
 

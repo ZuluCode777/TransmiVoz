@@ -12,7 +12,12 @@ struct AgenteTotalContenido: View {
     @Environment(\.openURL) private var abrirURL
     @FocusState private var campoEnfocado: Bool
 
-    init(consulta: ConsultaModelo) {
+    /// La pestaña Inicio es la elegida en la raíz. Al pasar a `false` se corta lo que dejó sonando la respuesta que abrió otra pantalla:
+    /// `onDisappear` ya no avisa (esta pantalla estaba cubierta desde antes).
+    let inicioVisible: Bool
+
+    init(consulta: ConsultaModelo, inicioVisible: Bool) {
+        self.inicioVisible = inicioVisible
         _agente = State(initialValue: AgenteTotalModelo(consulta: consulta, avisos: .sistema))
     }
 
@@ -41,6 +46,9 @@ struct AgenteTotalContenido: View {
         }
         .onAppear { agente.alAparecer() }
         .onDisappear { agente.alDesaparecer() }
+        .onChange(of: inicioVisible) { _, visible in
+            if !visible { agente.alSalirDeInicio() }
+        }
         .onChange(of: agente.consulta.estado) { _, nuevo in agente.consultaCambio(nuevo) }
         .onChange(of: agente.consulta.dictado?.estado) { _, nuevo in
             if let nuevo { agente.dictadoCambio(nuevo) }

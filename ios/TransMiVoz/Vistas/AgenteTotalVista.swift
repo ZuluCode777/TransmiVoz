@@ -4,11 +4,13 @@ import SwiftUI
 /// baldosas. `InicioVista` lo pone en lugar de las baldosas cuando el modo es `.total`.
 ///
 /// Se construye sobre la `ConsultaModelo` de la app (`entorno.consulta`): la misma consulta, dictado y voz que la pestaña
-/// Consulta, sin otro reconocedor ni otro dueño del audio.
+/// Consulta, sin otro reconocedor ni otro dueño del audio. `inicioVisible` dice si la pestaña Inicio es la elegida en la raíz:
+/// al dejarla se corta la voz de la respuesta que abrió una pantalla (`AgenteTotalModelo.alSalirDeInicio`).
 struct AgenteTotalVista: View {
     let consulta: ConsultaModelo
+    let inicioVisible: Bool
 
     var body: some View {
-        AgenteTotalContenido(consulta: consulta)
+        AgenteTotalContenido(consulta: consulta, inicioVisible: inicioVisible)
     }
 }
