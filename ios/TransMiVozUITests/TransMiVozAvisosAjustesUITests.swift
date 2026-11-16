@@ -231,6 +231,23 @@ final class TransMiVozEmergenciaUITests: EmergenciaUITestCase {
         XCTAssertLessThan(elemento("emergencia-llamar-123").frame.minY, elemento("emergencia-otras-lineas").frame.minY)
     }
 
+    /// Texto equivalente al audio (`especificacion-accesibilidad.md` §5): lo que dice la voz está en «La app dijo», con
+    /// «Repetir». En el Simulator no hay salida privada: la voz no suena y la pantalla lo dice con palabras, también al repetir.
+    func testLaAppDijoMuestraLaIntroduccionYRepetirExplicaPorQueNoSeOye() throws {
+        abrirEmergencia(categoria: "UICTContentSizeCategoryL")
+        traerAVista("emergencia-repetir", en: app)
+        XCTAssertEqual(elemento("emergencia-app-dijo").label, "La app dijo")
+        XCTAssertEqual(elemento("emergencia-app-dijo-texto").label, "Emergencia. Toca el botón rojo para llamar a la línea 123.")
+        let repetir = elemento("emergencia-repetir")
+        XCTAssertEqual(repetir.label, "Repetir lo que dijo la app")
+        XCTAssertGreaterThanOrEqual(repetir.frame.height, 44, "«Repetir» mide menos de 44 pt de alto")
+        let sinSalida = "No se dijo en voz alta: no hay salida privada de audio."
+        XCTAssertTrue(elemento("emergencia-app-dijo-resultado").waitForExistence(timeout: 10))
+        XCTAssertEqual(elemento("emergencia-app-dijo-resultado").label, sinSalida, "al abrir, dice por qué no sonó")
+        repetir.tap()
+        esperar(elemento("emergencia-app-dijo-resultado"), "label == %@", sinSalida, "«Repetir» no dejó el motivo en pantalla")
+    }
+
     func testEmergenciaVuelveAInicioConElBotonAtras() throws {
         abrirEmergencia(categoria: "UICTContentSizeCategoryL")
         app.navigationBars.buttons.firstMatch.tap()
@@ -242,7 +259,7 @@ final class TransMiVozEmergenciaUITests: EmergenciaUITestCase {
         let fase = AuditoriaFase("emergencia", app: app, caso: self)
         fase.exponer("emergencia-encabezado", etiqueta: "Emergencia")
         try fase.auditar("emergencia-arriba")
-        fase.exponer("emergencia-aclaracion-1")
+        fase.exponer("emergencia-repetir")
         try fase.auditar("emergencia-abajo")
         try fase.cerrar()
     }
@@ -262,8 +279,8 @@ final class TransMiVozEmergenciaTextoGrandeUITests: EmergenciaUITestCase {
         try fase.auditar("texto-muy-grande-Emergencia-123")
         fase.exponer("emergencia-llamar-195", etiqueta: "Atención al usuario TransMilenio. Número 195.")
         try fase.auditar("texto-muy-grande-Emergencia-195")
-        fase.exponer("emergencia-aclaracion-1")
-        try fase.auditar("texto-muy-grande-Emergencia-aclaracion")
+        fase.exponer("emergencia-repetir")
+        try fase.auditar("texto-muy-grande-Emergencia-repetir")
         try fase.cerrar()
     }
 }

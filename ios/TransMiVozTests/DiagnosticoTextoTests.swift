@@ -55,9 +55,9 @@ final class DiagnosticoTextoTests: XCTestCase {
         XCTAssertEqual(sinAuriculares.estado, .atencion)
         XCTAssertTrue(sinAuriculares.detalle.contains("3 voces en español"))
         XCTAssertTrue(sinAuriculares.detalle.contains("auriculares"))
-        XCTAssertEqual(DiagnosticoTexto.voz(vocesEnEspanol: 1, habla: .iniciada).estado, .correcto)
-        XCTAssertTrue(DiagnosticoTexto.voz(vocesEnEspanol: 1, habla: .iniciada).detalle.contains("1 voz en español."))
-        XCTAssertEqual(DiagnosticoTexto.voz(vocesEnEspanol: 0, habla: .iniciada).estado, .atencion)
+        XCTAssertEqual(DiagnosticoTexto.voz(vocesEnEspanol: 1, habla: .dichaEntera).estado, .correcto)
+        XCTAssertTrue(DiagnosticoTexto.voz(vocesEnEspanol: 1, habla: .dichaEntera).detalle.contains("1 voz en español."))
+        XCTAssertEqual(DiagnosticoTexto.voz(vocesEnEspanol: 0, habla: .dichaEntera).estado, .atencion)
         XCTAssertEqual(DiagnosticoTexto.voz(vocesEnEspanol: 2, habla: .sesionNoDisponible).estado, .fallo)
     }
 

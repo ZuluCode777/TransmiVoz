@@ -46,7 +46,7 @@ struct SondaPlanificador: SondaDiagnostico {
 
 /// «Voz de la app»: dice de verdad la frase de prueba por la `ControlVoz` compartida de la app (la de los avisos, la consulta y
 /// Emergencia), sin abrir otra sesión de audio ni otra cola de voz. Por eso sigue sus reglas: solo suena con la voz permitida
-/// y por auriculares, y no corta ni tapa una locución ajena; cada caso se dice con su texto en vez de darse por bueno.
+/// y por auriculares, y no corta ni tapa una locución ajena; solo cuenta como correcta si su frase sonó entera, y cada otro caso se dice con su texto.
 /// `vocesEnEspanol` lo da el sistema (`AVSpeechSynthesisVoice`).
 struct SondaVoz: SondaDiagnostico {
     let voz: ControlVoz
@@ -68,15 +68,22 @@ struct SondaVoz: SondaDiagnostico {
             // Interrumpida (llamada) o sesión de audio rechazada: el iPhone no dejó hablar.
             return DiagnosticoTexto.voz(vocesEnEspanol: voces, habla: .sesionNoDisponible)
         case .hablado:
-            // Espera a que termine la frase para que el resultado no llegue antes de que suene; la corta solo si sigue siendo la suya.
+            // Espera a que termine la frase: es éxito solo si SU locución sonó entera. Si habló otro después (un aviso del
+            // accesorio), la cola de uno ya la cortó y lo que suena no es nuestro: no se toca.
             let propia = voz.locuciones
             var esperado: TimeInterval = 0
             while voz.hablando && voz.locuciones == propia && esperado < tope && !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: 50_000_000)
                 esperado += 0.05
             }
-            if voz.hablando && voz.locuciones == propia { voz.descartarTodo() }
-            return DiagnosticoTexto.voz(vocesEnEspanol: voces, habla: .iniciada)
+            let habla: HablaDiagnostico
+            if voz.hablando && voz.locuciones == propia {
+                voz.descartarTodo()
+                habla = Task.isCancelled ? .interrumpida : .noTerminoATiempo
+            } else {
+                habla = voz.locuciones == propia && voz.ultimaSeOyoEntera && !Task.isCancelled ? .dichaEntera : .interrumpida
+            }
+            return DiagnosticoTexto.voz(vocesEnEspanol: voces, habla: habla)
         }
     }
 }
