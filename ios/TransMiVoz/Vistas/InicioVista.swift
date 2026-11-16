@@ -97,7 +97,7 @@ struct InicioVista: View {
         case .lupa: LupaVista(modelo: entorno.lupa, avisoSintetico: entorno.modoPruebas)
         case .gps: GpsAuditivoVista()
         case .metro: MetroVista()
-        case .emergencia: EmergenciaVista()
+        case .emergencia: EmergenciaVista(voz: entorno.avisos.voz)
         }
     }
 }

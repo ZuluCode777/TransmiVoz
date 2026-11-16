@@ -58,6 +58,7 @@ final class TextoAyudaTests: XCTestCase {
 
     func testAyudaDiceDondeEstanLasSeccionesDeAjustes() {
         XCTAssertTrue(textoDeAyuda("Cómo usarla").contains("«Más ajustes»"))
+        XCTAssertTrue(textoDeAyuda("Cómo usarla").contains("el Diagnóstico"), "la Ayuda nombra todo lo que ofrece el menú")
     }
 
     func testAyudaOfreceLosTresNumerosDeEmergenciaComoEnlaces() {

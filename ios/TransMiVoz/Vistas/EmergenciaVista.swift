@@ -2,12 +2,16 @@ import SwiftUI
 
 /// «Emergencia» (web: `components/assistance.tsx`). Se abre desde la baldosa «Emergencia» de Inicio. El botón rojo grande llama
 /// al 123 y debajo están las otras líneas de la web. Cada botón es un enlace `tel:`: iOS abre su propia confirmación y la
-/// persona decide si llama; la app nunca marca sola. Al abrirse dice la introducción de la web por la voz de la app
-/// (`SintetizadorSistema`, la misma de los avisos: habla solo por auriculares; con VoiceOver se lee la pantalla). Conserva el
-/// título de navegación «Emergencia»: las pruebas de Inicio abren la pantalla por él.
+/// persona decide si llama; la app nunca marca sola. Al abrirse dice la introducción de la web por la `ControlVoz` compartida
+/// de la app (`EmergenciaVozModelo`: sin otra sesión de audio ni otra cola de voz; habla solo con la voz permitida y por
+/// auriculares, y nunca tapa un aviso del accesorio; con VoiceOver se lee la pantalla). Conserva el título de navegación
+/// «Emergencia»: las pruebas de Inicio abren la pantalla por él.
 struct EmergenciaVista: View {
-    /// Se crea al aparecer, no al construir la vista: sin voz ni sesión de audio hasta que la pantalla está a la vista.
-    @State private var voz: SintetizadorSistema?
+    @State private var voz: EmergenciaVozModelo
+
+    init(voz: ControlVoz) {
+        _voz = State(initialValue: EmergenciaVozModelo(voz: voz))
+    }
 
     var body: some View {
         ScrollView {
@@ -39,14 +43,9 @@ struct EmergenciaVista: View {
         .navigationBarTitleDisplayMode(.inline)
         .bordeInferiorLegible()
         .bordeSuperiorNitido()
-        .onAppear {
-            let sintetizador = voz ?? SintetizadorSistema()
-            voz = sintetizador
-            // Sin auriculares el sintetizador no habla (`rutaNoPrivada`): es su regla, no un fallo de esta pantalla.
-            _ = sintetizador.hablar(TextoEmergencia.introHablada)
-        }
+        .onAppear { voz.decirIntroduccion() }
         // Al salir se corta solo esta locución: la voz no sigue hablando de una pantalla que ya no se ve.
-        .onDisappear { voz?.detener() }
+        .onDisappear { voz.salir() }
     }
 }
 

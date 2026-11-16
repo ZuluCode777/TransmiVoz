@@ -38,6 +38,14 @@ private struct ClienteAgenteDeMentira: ClienteAgente {
     func consultar(texto: String, origenPendiente: String?) async throws -> RespuestaAgente { try resultado.get() }
 }
 
+private struct PlanificadorDeMentira: ClientePlanificador {
+    let resultado: Result<ListaLugares, ErrorConsulta>
+    func buscarRutas(consulta: String) async throws -> ResultadoBusquedaRutas { throw ErrorConsulta.cancelada }
+    func detalleRuta(codigo: String) async throws -> DetalleRuta { throw ErrorConsulta.cancelada }
+    func listarLugares() async throws -> ListaLugares { try resultado.get() }
+    func planearViaje(origen: String, destino: String) async throws -> PlanViaje { throw ErrorConsulta.cancelada }
+}
+
 @MainActor
 final class DiagnosticoModeloTests: XCTestCase {
     private let correcto = ResultadoPrueba(estado: .correcto, detalle: "bien")
@@ -158,6 +166,117 @@ final class DiagnosticoModeloTests: XCTestCase {
         let resultado = await SondaAsistente(cliente: ClienteAgenteDeMentira(resultado: .failure(.sinConexion))).ejecutar()
         XCTAssertEqual(resultado.estado, .fallo)
         XCTAssertTrue(resultado.detalle.contains("No hay conexión con el servidor."))
+    }
+
+    // MARK: Voz de la app (la `ControlVoz` compartida, con una salida de voz de mentira)
+
+    private func bancoDeVoz(ruta: RutaAudio = .privada) -> (ControlVoz, SalidaVozFalsa) {
+        let salida = SalidaVozFalsa()
+        return (ControlVoz(salida: salida, consultarRuta: { ruta }), salida)
+    }
+
+    func testLaVozDeLaAppHablaPorLaColaUnicaYEsperaAQueTermineSinCortarla() async {
+        let (voz, salida) = bancoDeVoz()
+        let terminar = Task { try? await Task.sleep(nanoseconds: 150_000_000); salida.terminarSola() }
+        let resultado = await SondaVoz(voz: voz, vocesEnEspanol: { 2 }).ejecutar()
+        await terminar.value
+        XCTAssertEqual(resultado.estado, .correcto)
+        XCTAssertEqual(salida.dicho, [DiagnosticoTexto.fraseDeVoz])
+        XCTAssertEqual(voz.locuciones, 1, "es una locución de la cola única de la app, no otra sesión de voz")
+        XCTAssertEqual(salida.completas, [DiagnosticoTexto.fraseDeVoz], "la frase sonó entera: nadie la cortó")
+    }
+
+    func testUnaFraseQueNoTerminaSeCortaPeroSoloSiSigueSiendoLaPropia() async {
+        let (voz, salida) = bancoDeVoz()
+        let resultado = await SondaVoz(voz: voz, vocesEnEspanol: { 1 }, tope: 0.1).ejecutar()
+        XCTAssertEqual(resultado.estado, .correcto)
+        XCTAssertEqual(salida.cortadas, [DiagnosticoTexto.fraseDeVoz], "al vencer el tope corta su propia frase")
+    }
+
+    func testSinSalidaPrivadaOConLaVozApagadaNoHablaYLoDiceEnVezDeDarloPorBueno() async {
+        let (_, salidaAltavoz) = bancoDeVoz(ruta: .noPrivada)
+        let altavoz = await SondaVoz(voz: ControlVoz(salida: salidaAltavoz, consultarRuta: { .noPrivada }), vocesEnEspanol: { 2 }).ejecutar()
+        XCTAssertEqual(altavoz.estado, .atencion)
+        XCTAssertTrue(altavoz.detalle.contains("auriculares"))
+        XCTAssertTrue(salidaAltavoz.dicho.isEmpty)
+
+        let (voz, salida) = bancoDeVoz()
+        voz.permitida = { false }
+        let apagada = await SondaVoz(voz: voz, vocesEnEspanol: { 2 }).ejecutar()
+        XCTAssertEqual(apagada.estado, .atencion)
+        XCTAssertTrue(apagada.detalle.contains("apagada"))
+        XCTAssertTrue(salida.dicho.isEmpty)
+    }
+
+    func testUnAvisoSonandoNoSeCortaNiSeTapaPorLaPruebaDeVoz() async {
+        let (voz, salida) = bancoDeVoz()
+        voz.anunciar("Objeto cerca.", prioridad: .urgente)
+        let resultado = await SondaVoz(voz: voz, vocesEnEspanol: { 2 }).ejecutar()
+        XCTAssertEqual(resultado.estado, .atencion)
+        XCTAssertEqual(salida.dicho, ["Objeto cerca."])
+        XCTAssertTrue(salida.cortadas.isEmpty)
+        XCTAssertTrue(salida.hablando)
+    }
+
+    func testUnAudioQueElIPhoneNoDejaActivarEsUnFallo() async {
+        let (voz, salida) = bancoDeVoz()
+        salida.resultado = .sesionNoDisponible
+        let resultado = await SondaVoz(voz: voz, vocesEnEspanol: { 2 }).ejecutar()
+        XCTAssertEqual(resultado.estado, .fallo)
+    }
+
+    // MARK: Planificador (lista de lugares por `ClientePlanificadorHTTP.interpretar`, el mismo camino del cliente real)
+
+    private func planificador(_ resultado: Result<ListaLugares, ErrorConsulta>) -> SondaPlanificador {
+        SondaPlanificador(cliente: PlanificadorDeMentira(resultado: resultado))
+    }
+
+    func testElPlanificadorQueRespondeEsCorrectoYDiceCuantosLugares() async throws {
+        let lista: ListaLugares = try decodificarPlanificador(FixturesPlanificador.lugares)
+        let resultado = await planificador(.success(lista)).ejecutar()
+        XCTAssertEqual(resultado.estado, .correcto)
+        XCTAssertTrue(resultado.detalle.contains("3 lugares"))
+    }
+
+    func testUnCatalogoAntiguoOSinLugaresEsAtencionNoExito() async throws {
+        let antiguo: ListaLugares = try decodificarPlanificador(
+            variante(#""antiguo":false"#, por: #""antiguo":true"#))
+        let conCatalogoAntiguo = await planificador(.success(antiguo)).ejecutar()
+        XCTAssertEqual(conCatalogoAntiguo.estado, .atencion)
+        let vacia: ListaLugares = try decodificarPlanificador(
+            variante(#"["Estación Ejemplo Centro","Estación Ejemplo Norte","Estación Ejemplo Sur"]"#, por: "[]"))
+        let resultado = await planificador(.success(vacia)).ejecutar()
+        XCTAssertEqual(resultado.estado, .atencion)
+        XCTAssertTrue(resultado.detalle.contains("sin lugares"))
+    }
+
+    func testUnServidorSinPlanificadorFallaConSuPropioTextoYSinDireccionEsAtencion() async throws {
+        // Lo que de verdad lanza el cliente con un 404 sin el cuerpo del planificador.
+        let sinEndpoint = try XCTUnwrap(errorDeInterpretar(estado: 404))
+        let falla = await planificador(.failure(sinEndpoint)).ejecutar()
+        XCTAssertEqual(falla.estado, .fallo)
+        XCTAssertTrue(falla.detalle.contains("no tiene el planificador"))
+
+        let sinDireccion = await planificador(.failure(.servidorNoConfigurado)).ejecutar()
+        XCTAssertEqual(sinDireccion.estado, .atencion)
+        let otra = await planificador(.failure(.sinConexion)).ejecutar()
+        XCTAssertEqual(otra.estado, .fallo)
+        XCTAssertFalse(otra.detalle.contains("planificador"), "los demás errores usan el texto de siempre")
+    }
+
+    /// El fixture de lugares con un trozo cambiado; falla si el trozo no estaba (una variante que no cambia nada probaría lo contrario).
+    private func variante(_ buscado: String, por nuevo: String, file: StaticString = #filePath, line: UInt = #line) -> String {
+        XCTAssertTrue(FixturesPlanificador.lugares.contains(buscado), "el fixture no contiene «\(buscado)»", file: file, line: line)
+        return FixturesPlanificador.lugares.replacingOccurrences(of: buscado, with: nuevo)
+    }
+
+    private func errorDeInterpretar(estado: Int) -> ErrorConsulta? {
+        do {
+            let _: ListaLugares = try decodificarPlanificador("{}", estado: estado)
+            return nil
+        } catch {
+            return error as? ErrorConsulta
+        }
     }
 
     func testLaSondaSinteticaSeRotulaComoSimulada() async {

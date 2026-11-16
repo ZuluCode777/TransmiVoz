@@ -9,6 +9,8 @@ enum PruebaDiagnostico: String, CaseIterable, Identifiable, Sendable {
     case servidor
     /// El asistente responde (`POST /api/agent`, por `ClienteAgenteHTTP`).
     case asistente
+    /// El planificador de rutas responde (`POST /api/planificador`, operación `listar-lugares`, por `ClientePlanificadorHTTP`).
+    case planificador
     case voz
     case reconocimiento
     case microfono

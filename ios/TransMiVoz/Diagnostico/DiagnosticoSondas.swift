@@ -4,32 +4,8 @@ import Foundation
 import Speech
 
 // Las sondas de sistema del diagnóstico: leen el estado real de este iPhone con las mismas piezas que usa la app
-// (`SintetizadorSistema`, `ReconocedorSFSpeech`, `CamaraLupaAVFoundation`). Ninguna provoca un aviso de permiso del sistema.
+// (`ReconocedorSFSpeech`, `CamaraLupaAVFoundation`; la voz, por la `ControlVoz` compartida: `SondaVoz`). Ninguna provoca un aviso de permiso del sistema.
 // Nada de esto se ha probado en un iPhone: en las pruebas de interfaz las sustituyen las sintéticas (`SondaSintetica`).
-
-/// «Voz de la app»: cuenta las voces en español y dice de verdad la frase de prueba por `SintetizadorSistema`, el mismo
-/// sintetizador (y la misma regla: solo por auriculares) que la voz de los avisos.
-struct SondaVoz: SondaDiagnostico {
-    @MainActor func ejecutar() async -> ResultadoPrueba {
-        let voces = AVSpeechSynthesisVoice.speechVoices().filter { $0.language.lowercased().hasPrefix("es") }.count
-        let sintetizador = SintetizadorSistema()
-        switch sintetizador.hablar(DiagnosticoTexto.fraseDeVoz) {
-        case .iniciada:
-            // Espera a que termine la frase (tope de 8 s) para que el resultado no llegue antes de que suene.
-            var esperado = 0
-            while sintetizador.hablando && esperado < 80 && !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: 100_000_000)
-                esperado += 1
-            }
-            sintetizador.detener()
-            return DiagnosticoTexto.voz(vocesEnEspanol: voces, habla: .iniciada)
-        case .rutaNoPrivada:
-            return DiagnosticoTexto.voz(vocesEnEspanol: voces, habla: .rutaNoPrivada)
-        case .sesionNoDisponible:
-            return DiagnosticoTexto.voz(vocesEnEspanol: voces, habla: .sesionNoDisponible)
-        }
-    }
-}
 
 /// «Reconocimiento de voz»: permiso de reconocimiento y lo que el sistema declara poder hacer en español
 /// (`ReconocedorSFSpeech.capacidad`).
@@ -134,14 +110,15 @@ final class SondaBluetooth: NSObject, SondaDiagnostico, CBCentralManagerDelegate
 }
 
 extension DiagnosticoModelo {
-    /// El diagnóstico de la app. El servidor y el asistente usan los clientes HTTP de siempre con la configuración de Ajustes
+    /// El diagnóstico de la app. El servidor, el asistente y el planificador usan los clientes HTTP de siempre con la configuración de Ajustes
     /// (la clave solo viaja en la cabecera que arma el cliente: ningún resultado la muestra). Con `simulado` (pruebas de
     /// interfaz) las cinco pruebas de sistema son sintéticas y rotuladas; el servidor sigue siendo el cliente real, que sin
     /// dirección configurada responde «falta la dirección» sin tocar la red.
-    @MainActor static func crear(ajustes: AjustesServidorModelo, simulado: Bool) -> DiagnosticoModelo {
+    @MainActor static func crear(ajustes: AjustesServidorModelo, voz: ControlVoz, simulado: Bool) -> DiagnosticoModelo {
         var sondas: [PruebaDiagnostico: any SondaDiagnostico] = [
             .servidor: SondaServidor(cliente: ClienteAnunciosHTTP { await ajustes.configuracion }),
             .asistente: SondaAsistente(cliente: ClienteAgenteHTTP { await ajustes.configuracion }),
+            .planificador: SondaPlanificador(cliente: ClientePlanificadorHTTP { await ajustes.configuracion }),
         ]
         if simulado {
             sondas[.voz] = SondaSintetica(resultado: DiagnosticoTexto.voz(vocesEnEspanol: 2, habla: .rutaNoPrivada))
@@ -151,7 +128,9 @@ extension DiagnosticoModelo {
             sondas[.camara] = SondaSintetica(resultado: DiagnosticoTexto.camara(.denegado, hayCamara: true))
             sondas[.bluetooth] = SondaSintetica(resultado: ResultadoPrueba(estado: .correcto, detalle: TextoAccesorio.bluetooth(.disponible)))
         } else {
-            sondas[.voz] = SondaVoz()
+            sondas[.voz] = SondaVoz(voz: voz) {
+                AVSpeechSynthesisVoice.speechVoices().filter { $0.language.lowercased().hasPrefix("es") }.count
+            }
             sondas[.reconocimiento] = SondaReconocimiento()
             sondas[.microfono] = SondaMicrofono()
             sondas[.camara] = SondaCamara()

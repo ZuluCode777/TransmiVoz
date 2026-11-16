@@ -31,7 +31,7 @@ struct AjustesVista: View {
                     switch seccion {
                     case .preferencias: PreferenciasVista(accesorio: entorno.accesorio)
                     case .favoritas: FavoritasVista(modelo: entorno.favoritas)
-                    case .diagnostico: DiagnosticoVista(ajustes: entorno.ajustes, modoPruebas: entorno.modoPruebas)
+                    case .diagnostico: DiagnosticoVista(ajustes: entorno.ajustes, voz: entorno.avisos.voz, modoPruebas: entorno.modoPruebas)
                     case .ayuda: AyudaVista()
                     }
                 }

@@ -3,12 +3,12 @@ import SwiftUI
 /// «Diagnóstico» (web: `/diagnostico`, `components/diagnostics.tsx`): comprueba en vivo, en este iPhone, que cada función
 /// responde. Se abre desde el menú «Más ajustes» de la pestaña Ajustes. Cada fila dice con palabras cómo terminó su prueba
 /// («Correcto», «Atención», «Falló»): ni el ícono ni el color son la única señal. Ninguna prueba pide permisos ni muestra la
-/// clave del servidor; el servidor y el asistente se prueban con los clientes de siempre y la configuración de Ajustes.
+/// clave del servidor; el servidor, el asistente y el planificador de rutas se prueban con los clientes de siempre y la configuración de Ajustes.
 struct DiagnosticoVista: View {
     @State private var modelo: DiagnosticoModelo
 
-    init(ajustes: AjustesServidorModelo, modoPruebas: Bool) {
-        _modelo = State(initialValue: DiagnosticoModelo.crear(ajustes: ajustes, simulado: modoPruebas))
+    init(ajustes: AjustesServidorModelo, voz: ControlVoz, modoPruebas: Bool) {
+        _modelo = State(initialValue: DiagnosticoModelo.crear(ajustes: ajustes, voz: voz, simulado: modoPruebas))
     }
 
     var body: some View {

@@ -1,9 +1,9 @@
 import XCTest
 
 // Pruebas de interfaz de Emergencia y Diagnóstico, en el Simulator y sin red. Demuestran la interfaz con entradas simuladas:
-// las cinco pruebas de sistema del diagnóstico son sintéticas y rotuladas «[SIMULADO]»; el servidor y el asistente usan el
-// cliente real, que sin dirección configurada responde «falta la dirección» sin tocar la red. No prueban llamadas,
-// voz, permisos, Bluetooth ni VoiceOver reales.
+// las cinco pruebas de sistema del diagnóstico son sintéticas y rotuladas «[SIMULADO]»; el servidor, el asistente y el
+// planificador usan los clientes reales, que sin dirección configurada responden «falta la dirección» sin tocar la red. No
+// prueban llamadas, voz, permisos, Bluetooth ni VoiceOver reales.
 //
 // Los ayudantes de `TransMiVozUITests.swift` (`exponer`, `FaseAuditada`, `auditar`…) son `private` de ese archivo y no se
 // cambian. Aquí se repite lo mínimo, con las mismas reglas: los cuatro grupos de la auditoría nativa de siempre, sin
@@ -272,9 +272,9 @@ final class TransMiVozEmergenciaTextoGrandeUITests: EmergenciaUITestCase {
 
 /// El diagnóstico abierto desde el menú «Más ajustes» de Ajustes.
 class DiagnosticoUITestCase: AjustesUITestCase {
-    let pruebas = ["servidor", "asistente", "voz", "reconocimiento", "microfono", "camara", "bluetooth"]
+    let pruebas = ["servidor", "asistente", "planificador", "voz", "reconocimiento", "microfono", "camara", "bluetooth"]
     let titulos = [
-        "servidor": "Servidor", "asistente": "Asistente", "voz": "Voz de la app", "reconocimiento": "Reconocimiento de voz",
+        "servidor": "Servidor", "asistente": "Asistente", "planificador": "Rutas y viaje", "voz": "Voz de la app", "reconocimiento": "Reconocimiento de voz",
         "microfono": "Micrófono", "camara": "Cámara", "bluetooth": "Bluetooth",
     ]
 
@@ -296,9 +296,9 @@ class DiagnosticoUITestCase: AjustesUITestCase {
 }
 
 final class TransMiVozDiagnosticoUITests: DiagnosticoUITestCase {
-    func testDiagnosticoSeAbreDesdeAjustesConSusSietePruebasSinProbar() throws {
+    func testDiagnosticoSeAbreDesdeAjustesConSusOchoPruebasSinProbar() throws {
         abrirDiagnostico(categoria: "UICTContentSizeCategoryL")
-        XCTAssertEqual(elemento("diagnostico-resumen").label, "0 de 7 correctas")
+        XCTAssertEqual(elemento("diagnostico-resumen").label, "0 de 8 correctas")
         for prueba in pruebas {
             XCTAssertEqual(elemento("diagnostico-titulo-\(prueba)").label, titulos[prueba], "falta la prueba «\(prueba)»")
             XCTAssertEqual(elemento("diagnostico-resultado-\(prueba)").label, "Sin probar", "nada se da por probado antes de correr")
@@ -312,9 +312,10 @@ final class TransMiVozDiagnosticoUITests: DiagnosticoUITestCase {
         abrirDiagnostico(categoria: "UICTContentSizeCategoryL")
         probarTodoYEsperar()
         let esperado: [String: String] = [
-            // Cliente real sin dirección configurada: no hay servidor que probar, y no es un servidor caído ni un éxito.
+            // Clientes reales sin dirección configurada: no hay servidor que probar, y no es un servidor caído ni un éxito.
             "servidor": "Atención: Falta la dirección del servidor.",
             "asistente": "Atención: Falta la dirección del servidor.",
+            "planificador": "Atención: Falta la dirección del servidor.",
             // Sondas sintéticas rotuladas, una de cada estado.
             "voz": "Atención: ",
             "reconocimiento": "Atención: ",
@@ -331,7 +332,7 @@ final class TransMiVozDiagnosticoUITests: DiagnosticoUITestCase {
             XCTAssertTrue(elemento("diagnostico-resultado-\(prueba)").label.contains("[SIMULADO]"), "la sonda sintética de «\(prueba)» se rotula")
         }
         // Solo las correctas se cuentan: micrófono y Bluetooth.
-        XCTAssertEqual(elemento("diagnostico-resumen").label, "2 de 7 correctas")
+        XCTAssertEqual(elemento("diagnostico-resumen").label, "2 de 8 correctas")
         // Nada que parezca una clave, una dirección o un encabezado de autorización.
         for prueba in pruebas {
             let texto = elemento("diagnostico-resultado-\(prueba)").label
@@ -345,7 +346,7 @@ final class TransMiVozDiagnosticoUITests: DiagnosticoUITestCase {
         elemento("diagnostico-probar-microfono").tap()
         esperar(elemento("diagnostico-resultado-microfono"), "label BEGINSWITH %@", "Correcto: ", "La prueba del micrófono no terminó")
         XCTAssertEqual(elemento("diagnostico-resultado-voz").label, "Sin probar")
-        XCTAssertEqual(elemento("diagnostico-resumen").label, "1 de 7 correctas")
+        XCTAssertEqual(elemento("diagnostico-resumen").label, "1 de 8 correctas")
     }
 
     func testAuditoriaAccesibilidadDiagnostico() throws {

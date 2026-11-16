@@ -6,11 +6,15 @@ enum PermisoDiagnostico: Equatable, Sendable {
     case porPreguntar, concedido, denegado, restringido
 }
 
-/// Qué pasó al intentar decir la frase de prueba por la voz de la app (`SintetizadorSistema`).
+/// Qué pasó al intentar decir la frase de prueba por la voz compartida de la app (`ControlVoz`).
 enum HablaDiagnostico: Equatable, Sendable {
     case iniciada
-    /// La app solo habla por auriculares: por el altavoz no suena (política de `SintetizadorSistema`).
+    /// La app solo habla por auriculares: por el altavoz no suena (política de `ControlVoz`).
     case rutaNoPrivada
+    /// La voz propia de la app está apagada (VoiceOver activo, o la persona la apagó): la regla de `ControlVoz.permitida`.
+    case vozApagada
+    /// Ya suena otra locución de la app (un aviso del accesorio, la respuesta de la consulta): no se la corta ni se la tapa.
+    case otraVozSonando
     /// El sistema no dejó activar el audio (llamada u otra app en curso).
     case sesionNoDisponible
 }
@@ -49,6 +53,7 @@ enum DiagnosticoTexto {
         switch prueba {
         case .servidor: return "Servidor"
         case .asistente: return "Asistente"
+        case .planificador: return "Rutas y viaje"
         case .voz: return "Voz de la app"
         case .reconocimiento: return "Reconocimiento de voz"
         case .microfono: return "Micrófono"
@@ -62,6 +67,7 @@ enum DiagnosticoTexto {
         switch prueba {
         case .servidor: return "La app llega al servidor que escribiste en Ajustes y recibe respuesta."
         case .asistente: return "El asistente entiende una consulta de viaje y responde."
+        case .planificador: return "La búsqueda de rutas y el viaje entre dos lugares reciben la lista de lugares del servidor."
         case .voz: return "La app puede hablar en español."
         case .reconocimiento: return "El iPhone puede entender lo que dices."
         case .microfono: return "La app puede escuchar."
@@ -117,6 +123,28 @@ enum DiagnosticoTexto {
         return ResultadoPrueba(estado: .correcto, detalle: "El asistente respondió con \(motor). El texto de la respuesta no se muestra aquí.")
     }
 
+    /// El planificador: la lista de lugares respondió. Sin lugares, o con un catálogo antiguo, el servidor llegó pero las
+    /// rutas no son confiables: «atención». La frase de procedencia es la que da el servidor, tal cual.
+    static func planificador(_ lista: ListaLugares) -> ResultadoPrueba {
+        let cuantos = lista.lugares.count == 1 ? "1 lugar" : "\(lista.lugares.count) lugares"
+        if lista.lugares.isEmpty {
+            return ResultadoPrueba(estado: .atencion, detalle: "El planificador respondió, pero sin lugares. \(lista.catalogo.procedencia)")
+        }
+        if lista.catalogo.antiguo {
+            return ResultadoPrueba(estado: .atencion, detalle: "El planificador respondió con \(cuantos), pero el catálogo está antiguo. \(lista.catalogo.procedencia)")
+        }
+        return ResultadoPrueba(estado: .correcto, detalle: "El planificador respondió con \(cuantos). \(lista.catalogo.procedencia)")
+    }
+
+    /// Un servidor sin el planificador contesta 404 sin el cuerpo del contrato (`ClientePlanificadorHTTP`): no es «el servidor
+    /// falló» sino que le falta el endpoint. El resto de errores son los de siempre.
+    static func falloDelPlanificador(_ error: Error) -> ResultadoPrueba {
+        if (error as? ErrorConsulta) == .errorDelServidor(estado: 404) {
+            return ResultadoPrueba(estado: .fallo, detalle: "El servidor no tiene el planificador de rutas (404). Avisa a quien lo administra: puede estar desactualizado.")
+        }
+        return falloDeServidor(error)
+    }
+
     // MARK: Voz y permisos (el estado lo lee `DiagnosticoSondas`)
 
     static func voz(vocesEnEspanol: Int, habla: HablaDiagnostico) -> ResultadoPrueba {
@@ -130,6 +158,12 @@ enum DiagnosticoTexto {
             return ResultadoPrueba(
                 estado: .atencion,
                 detalle: "\(voces) La voz está lista, pero la app solo habla por auriculares y ahora la salida es el altavoz. Conecta auriculares y vuelve a probar.")
+        case .vozApagada:
+            return ResultadoPrueba(
+                estado: .atencion,
+                detalle: "\(voces) La voz de la app está apagada (VoiceOver activo o apagada en Preferencias), así que no se dijo la frase. Enciéndela y vuelve a probar.")
+        case .otraVozSonando:
+            return ResultadoPrueba(estado: .atencion, detalle: "\(voces) Suena otro aviso de la app y no se le corta. Vuelve a probar cuando termine.")
         case .sesionNoDisponible:
             return ResultadoPrueba(estado: .fallo, detalle: "\(voces) El iPhone no dejó activar el audio (una llamada u otra app lo está usando).")
         }
