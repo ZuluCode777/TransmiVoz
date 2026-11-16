@@ -21,7 +21,7 @@ final class GpsAuditivoModeloTests: XCTestCase {
         init(brujula: Bool = true, sinTemporizador: Bool = false) {
             ubicacion = UbicacionFalsa(rumboDisponible: brujula)
             modelo = GpsAuditivoModelo(
-                cliente: cliente, proveedor: ubicacion, locutor: locutor, reloj: reloj.reloj,
+                cliente: cliente, proveedor: ubicacion, locutor: locutor, reloj: { [reloj] in reloj.ahora },
                 // Despierta rápido y vuelve a mirar el reloj de la prueba: no espera 60 s de verdad.
                 dormir: { _ in try await Task.sleep(nanoseconds: sinTemporizador ? 3_600_000_000_000 : 2_000_000) })
         }

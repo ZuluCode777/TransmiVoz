@@ -10,18 +10,6 @@ func modificar(_ json: String, _ cambio: (inout [String: Any]) -> Void) -> Strin
     return String(decoding: datos, as: UTF8.self)
 }
 
-/// Reloj monotónico controlado por la prueba, en milisegundos.
-final class RelojFalso: @unchecked Sendable {
-    private let candado = NSLock()
-    private var ms: Milisegundos
-
-    init(_ inicio: Milisegundos = 1_000_000) { ms = inicio }
-
-    var ahora: Milisegundos { candado.lock(); defer { candado.unlock() }; return ms }
-    func avanzar(_ delta: Milisegundos) { candado.lock(); ms += delta; candado.unlock() }
-    var reloj: RelojMonotonico { { [self] in ahora } }
-}
-
 /// Proveedor de ubicación que controla la prueba: no hay CoreLocation, GPS ni brújula.
 @MainActor
 final class UbicacionFalsa: ProveedorUbicacion {
