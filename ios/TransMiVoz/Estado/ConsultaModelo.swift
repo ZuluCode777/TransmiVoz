@@ -39,6 +39,9 @@ final class ConsultaModelo {
     private(set) var origenPendiente: String?
     /// Dictado de la pregunta; `nil` si esta pantalla no lo ofrece.
     let dictado: DictadoModelo?
+    /// Lee en voz alta la respuesta de una pregunta dictada y sin editar (EA-19). La pantalla de Ceguera total lo apaga mientras
+    /// está a la vista: ella lee todas las respuestas, también las escritas, con `decir`, y así no se leen dos veces.
+    @ObservationIgnored var lecturaAutomatica = true
 
     @ObservationIgnored private let cliente: ClienteAgente
     @ObservationIgnored private let voz: ControlVoz?
@@ -128,6 +131,11 @@ final class ConsultaModelo {
         detenerHabla()
     }
 
+    /// Calla lo que esta pantalla esté diciendo (la respuesta o un `decir`), y solo eso. La cancelación explícita de la persona.
+    func callar() {
+        detenerHabla()
+    }
+
     /// Corta la respuesta hablada de esta pantalla, y solo esa: si después habló otro (un aviso del accesorio), la cola de
     /// uno ya la cortó y lo que suena no es nuestro.
     private func detenerHabla() {
@@ -142,12 +150,21 @@ final class ConsultaModelo {
         return locucionPropia != voz.locuciones
     }
 
-    /// Lee la respuesta por la voz de la app. Con la captura abierta no se habla (la voz sonaría sobre el micrófono), y con un
-    /// aviso sonando tampoco (`ControlVoz.anunciar` lo cortaría): la pantalla ya muestra la respuesta.
+    /// Dice un texto por la voz de la app (la política de `ControlVoz`: voz permitida, ruta privada, sin interrupción). Con la
+    /// captura abierta no se habla (la voz sonaría sobre el micrófono), y con un aviso sonando tampoco (`ControlVoz.anunciar` lo
+    /// cortaría). Devuelve si sonó: quien llama decide qué hacer si no (la pantalla de Ceguera total lo anuncia por VoiceOver).
+    @discardableResult
+    func decir(_ texto: String) -> Bool {
+        guard let voz, dictado?.capturando != true, !suenaAlgoAjeno else { return false }
+        guard voz.anunciar(texto) == .hablado else { return false }
+        locucionPropia = voz.locuciones
+        return true
+    }
+
+    /// Lee la respuesta por la voz de la app; si no suena, la pantalla ya muestra la respuesta.
     private func hablar(_ respuesta: RespuestaAgente, escenario: EscenarioConsulta) {
-        guard let voz, dictado?.capturando != true, !suenaAlgoAjeno else { return }
         let partes = [escenario.anuncioResultado, respuesta.textoHablado].compactMap { $0 }
-        if voz.anunciar(partes.joined(separator: " ")) == .hablado { locucionPropia = voz.locuciones }
+        decir(partes.joined(separator: " "))
     }
 
     private func iniciar(con limpio: String) {
@@ -190,7 +207,7 @@ final class ConsultaModelo {
             // Un error conserva la aclaración (hay «Reintentar»); una respuesta la sustituye por la que traiga.
             if case .respuesta(let respuesta) = resultado {
                 self.origenPendiente = respuesta.origenPendiente
-                if dictada { self.hablar(respuesta, escenario: enviado) }
+                if dictada && self.lecturaAutomatica { self.hablar(respuesta, escenario: enviado) }
             }
         }
     }
