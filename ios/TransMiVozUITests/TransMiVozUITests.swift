@@ -2292,10 +2292,10 @@ final class TransMiVozInicioUITests: XCTestCase {
         XCTAssertTrue(parcial.isSelected, "Baja visión es el modo de partida")
         XCTAssertFalse(total.isSelected)
 
-        // Ceguera total: sin baldosas, con el gancho del Inicio de voz.
+        // Ceguera total: sin baldosas, con el asistente de voz.
         total.tap()
         XCTAssertTrue(total.waitForNonExistence(timeout: 10), "El menú no se cerró al elegir un modo")
-        XCTAssertTrue(elemento("provisional-agente-total").waitForExistence(timeout: 10), "Ceguera total no muestra su Inicio")
+        XCTAssertTrue(elemento("agente-total-microfono").waitForExistence(timeout: 10), "Ceguera total no muestra su Inicio")
         XCTAssertFalse(elemento("inicio-lupa").exists, "Ceguera total no muestra las baldosas")
         XCTAssertTrue(elemento("boton-menu-modo").exists, "la cabecera sigue en Ceguera total")
 

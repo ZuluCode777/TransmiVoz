@@ -54,7 +54,10 @@ final class EntornoApp {
         #else
         let planificador: ClientePlanificador = ClientePlanificadorHTTP { await ajustes.configuracion }
         #endif
-        serviciosRutas = ServiciosRutas(cliente: planificador, favoritas: favoritas, modoPruebas: modoPruebas)
+        // El dictado es el de la consulta y la voz la de los avisos, que en cada fábrica es la misma de la app: «Buscar hablando» y
+        // «Escuchar» no abren un segundo reconocedor ni un segundo dueño del audio.
+        serviciosRutas = ServiciosRutas(
+            cliente: planificador, favoritas: favoritas, modoPruebas: modoPruebas, dictado: consulta.dictado, voz: avisos.voz)
     }
 
     /// `UserDefaults` normales, o en las pruebas de interfaz una suite que se vacía en cada arranque: ningún modo elegido en una

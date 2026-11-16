@@ -3,10 +3,6 @@ import XCTest
 // Pruebas de interfaz del asistente de voz de «Ceguera total» (`AgenteTotalVista`), con cliente y dictado SIMULADOS y
 // rotulados (`-PRUEBAS_UI_SIMULADAS`, `-PRUEBAS_UI_DICTADO_SINTETICO`): sin red, micrófono, audio ni VoiceOver real.
 //
-// Dependencia de integración: si `InicioVista` aún no pasa la consulta (`AgenteTotalVista(consulta: entorno.consulta)`), la
-// pantalla es el marcador provisional y estas pruebas se SALTAN con ese motivo (no pasan ni fallan). Ver
-// `docs/expoandes/ios-agente-total.md`.
-//
 // Los ayudantes de `TransMiVozUITests.swift` son `private` a ese archivo y no se pueden reutilizar desde aquí: este archivo
 // trae los suyos, con la misma auditoría completa (todos los grupos, sin filtros ni exclusiones).
 
@@ -33,12 +29,7 @@ class AgenteTotalUITestCase: XCTestCase {
         XCTAssertTrue(total.waitForExistence(timeout: 10), "No se abrió el menú de modo")
         total.tap()
         XCTAssertTrue(total.waitForNonExistence(timeout: 10), "El menú no se cerró al elegir Ceguera total")
-        if !elemento("agente-total-microfono").waitForExistence(timeout: 10) {
-            try XCTSkipIf(
-                elemento("provisional-agente-total").exists,
-                "InicioVista aún no pasa la consulta a AgenteTotalVista(consulta:): falta la integración de la raíz")
-            XCTFail("Ceguera total no muestra el asistente de voz")
-        }
+        XCTAssertTrue(elemento("agente-total-microfono").waitForExistence(timeout: 10), "Ceguera total no muestra el asistente de voz")
     }
 
     func elemento(_ identificador: String) -> XCUIElement {

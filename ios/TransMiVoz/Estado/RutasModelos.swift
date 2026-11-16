@@ -64,10 +64,12 @@ struct ServiciosRutas {
     let cliente: ClientePlanificador
     let favoritas: FavoritasModelo
     let modoPruebas: Bool
-    /// Dictado y voz de la app, los mismos de la consulta, para «Buscar hablando» y «Escuchar». `nil` si quien arma los
-    /// servicios no los entrega (`EntornoApp`): esas dos funciones lo dicen en pantalla y se sigue escribiendo a mano.
-    var dictado: DictadoModelo?
-    var voz: ControlVoz?
+    /// El dictado de la consulta (`ConsultaModelo.dictado`, el mismo, no otro reconocedor) para «Buscar hablando». Es `nil` solo
+    /// cuando la consulta no tiene dictado (las pruebas de interfaz sin `-PRUEBAS_UI_DICTADO_SINTETICO`): la superposición lo dice
+    /// y se sigue escribiendo a mano. Sin valor por omisión: `EntornoApp` lo entrega siempre, y un olvido no compila.
+    let dictado: DictadoModelo?
+    /// La `ControlVoz` de la app (la misma de la consulta, los avisos y el accesorio: un solo dueño del audio) para «Escuchar».
+    let voz: ControlVoz
 }
 
 /// Búsqueda de rutas por código o estación.

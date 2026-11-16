@@ -43,8 +43,7 @@ struct InicioVista: View {
     @ViewBuilder private var contenido: some View {
         switch entorno.modo.modo {
         case .parcial: baldosas
-        // GANCHO del Inicio de voz: la tarea de Ceguera total reemplaza `AgenteTotalVista`.
-        case .total: AgenteTotalVista()
+        case .total: AgenteTotalVista(consulta: entorno.consulta)
         }
     }
 

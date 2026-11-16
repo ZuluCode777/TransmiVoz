@@ -83,16 +83,13 @@ final class TransMiVozRutasFuncionesUITests: RutasUITestCase {
         XCTAssertTrue(elemento("ruta-Z99").waitForExistence(timeout: 10), "Escribir debe seguir buscando")
     }
 
-    /// Con el dictado sintético cableado en `ServiciosRutas` (ver el PR): lo que «oye» llena el campo y busca, y la
-    /// superposición se cierra. Sin ese cableado se omite, no falla.
+    /// Con el dictado sintético de la consulta (el mismo que recibe `ServiciosRutas`): lo que «oye» llena el campo y busca, y la
+    /// superposición se cierra.
     func testLoDictadoLlenaElCampoYBuscaComoLaWeb() throws {
         lanzarCon(["-PRUEBAS_UI_DICTADO_SINTETICO", "-PRUEBAS_UI_DICTADO_PERMISO_CONCEDIDO", "-PRUEBAS_UI_DICTADO_GUION", "z99"])
         abrirRutas()
         elemento("boton-buscar-hablando").tap()
         XCTAssertTrue(elemento("boton-cerrar-voz").waitForExistence(timeout: 10), "No se abrió la superposición de voz")
-        if elemento("voz-mensaje").waitForExistence(timeout: 2), elemento("voz-mensaje").label.hasPrefix("El dictado no está disponible en esta pantalla") {
-            throw XCTSkip("`ServiciosRutas.dictado` no está cableado en `EntornoApp`: ver el PR.")
-        }
         let alternar = elemento("boton-voz-alternar")
         // La captura empieza sola poco después del anuncio «Te escucho…»; entonces el botón pasa a «Detener».
         let detener = NSPredicate(format: "label == %@", "Detener")
@@ -119,14 +116,10 @@ final class TransMiVozRutasFuncionesUITests: RutasUITestCase {
         XCTAssertTrue(escuchar.waitForExistence(timeout: 5), "El detalle debe ofrecer «Escuchar»")
         XCTAssertEqual(escuchar.label, "Escuchar")
         escuchar.tap()
-        // En las pruebas la voz es de mentira y la salida no es privada (o la voz aún no está cableada): no suena, y lo dice.
+        // En las pruebas la voz es de mentira y la salida no es privada: no suena, y lo dice. La voz de la app sí está cableada.
         let mensaje = elemento("mensaje-escuchar")
         XCTAssertTrue(mensaje.waitForExistence(timeout: 5), "Si no suena, la pantalla debe decir por qué")
-        let permitidos = [
-            "La voz de la app no está disponible en esta pantalla. La ruta está escrita aquí abajo.",
-            "No se dijo en voz alta: no hay salida privada de audio.",
-        ]
-        XCTAssertTrue(permitidos.contains(mensaje.label), mensaje.label)
+        XCTAssertEqual(mensaje.label, "No se dijo en voz alta: no hay salida privada de audio.")
     }
 
     // MARK: Favoritas
