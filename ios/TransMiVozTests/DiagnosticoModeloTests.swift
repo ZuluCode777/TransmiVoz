@@ -273,6 +273,14 @@ final class DiagnosticoModeloTests: XCTestCase {
         XCTAssertTrue(salida.hablando)
     }
 
+    func testUnaLlamadaYaActivaEsAtencionYSinIntentarHablar() async {
+        let (voz, salida) = bancoDeVoz()
+        voz.interrupcion(comenzo: true)
+        let resultado = await SondaVoz(voz: voz, vocesEnEspanol: { 2 }).ejecutar()
+        comprobarNoPasa(resultado, "se interrumpió")
+        XCTAssertTrue(salida.dicho.isEmpty)
+    }
+
     func testUnAudioQueElIPhoneNoDejaActivarEsUnFallo() async {
         let (voz, salida) = bancoDeVoz()
         salida.resultado = .sesionNoDisponible

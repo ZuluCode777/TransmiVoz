@@ -64,8 +64,10 @@ struct SondaVoz: SondaDiagnostico {
             return DiagnosticoTexto.voz(vocesEnEspanol: voces, habla: .vozApagada)
         case .silenciado(.cedeAUnAviso):
             return DiagnosticoTexto.voz(vocesEnEspanol: voces, habla: .otraVozSonando)
+        case .silenciado(.interrumpido):
+            return DiagnosticoTexto.voz(vocesEnEspanol: voces, habla: .interrumpida)
         case .silenciado:
-            // Interrumpida (llamada) o sesión de audio rechazada: el iPhone no dejó hablar.
+            // Sesión de audio rechazada: el iPhone no dejó hablar.
             return DiagnosticoTexto.voz(vocesEnEspanol: voces, habla: .sesionNoDisponible)
         case .hablado:
             // Espera a que termine la frase: es éxito solo si SU locución sonó entera. Si habló otro después (un aviso del
