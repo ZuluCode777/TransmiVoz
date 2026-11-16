@@ -2,8 +2,9 @@ import Foundation
 import Observation
 
 /// Las pruebas del diagnóstico, en el orden en que las corre «Probar todo» (web: `CHECKS` de `components/diagnostics.tsx`).
-/// La web además prueba el contexto seguro, los mapas y la ubicación; la app para iPhone no usa ubicación ni baja mapas
-/// por su cuenta, y su contexto es siempre seguro (HTTPS), así que esas no están aquí.
+/// La web además prueba el contexto seguro, los mapas y la ubicación; en la app el contexto es siempre seguro (HTTPS) y
+/// la ubicación solo la pide «Mapa y GPS» cuando la persona la activa (el diagnóstico nunca provoca ese aviso del sistema),
+/// así que esas pruebas no están aquí.
 enum PruebaDiagnostico: String, CaseIterable, Identifiable, Sendable {
     /// El servidor de Ajustes responde (`GET /api/anuncios`, por `ClienteAnunciosHTTP`).
     case servidor

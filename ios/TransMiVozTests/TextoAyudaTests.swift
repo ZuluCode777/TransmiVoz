@@ -12,6 +12,15 @@ final class TextoAyudaTests: XCTestCase {
         XCTAssertTrue(metro.contains("no presta servicio"))
     }
 
+    func testAyudaDiceQueExistenElMetroYMapaYGpsYCuandoSeUsaLaUbicacion() {
+        XCTAssertTrue(textoDeAyuda("Qué hace la app").contains("«Mapa y GPS»"))
+        XCTAssertFalse(textoDeAyuda("Metro de Bogotá").contains("no tiene pantalla de Metro"), "la pantalla de Metro existe")
+        let gps = textoDeAyuda("Mapa y GPS")
+        XCTAssertTrue(gps.contains("Solo pide tu ubicación cuando tú la activas"))
+        XCTAssertTrue(gps.contains("no la guarda ni la registra"))
+        XCTAssertTrue(gps.contains("no funciona en segundo plano"))
+    }
+
     func testAyudaReutilizaElAvisoDeSeguridadDelAccesorio() {
         let accesorio = textoDeAyuda("Accesorio de proximidad")
         XCTAssertTrue(accesorio.hasPrefix(TextoAccesorio.parrafosAvisoEnlace.joined(separator: " ")), "la Ayuda abre con el aviso fijo de la pantalla")
