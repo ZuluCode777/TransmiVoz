@@ -22,7 +22,7 @@ enum TextoGps {
     /// Qué hace la pantalla con la ubicación, dicho antes de pedir el permiso del sistema. Es cierto y completo: lo que se
     /// envía, a quién y qué no se hace.
     static let privacidad =
-        "Uso tu ubicación solo mientras esta pantalla está abierta y tú la activas. Envío tu ubicación al servidor de TransMiVoz únicamente para ordenar las estaciones por cercanía; no la guardo ni la registro, y no la sigo en segundo plano. Al salir de la pantalla o bloquear el iPhone, se detiene."
+        "Uso tu ubicación solo mientras esta pantalla está abierta y tú la activas. Envío tu ubicación al servidor de TransMiVoz para ordenar las estaciones y calcular distancias, orientación y cercanía aproximadas; no la guardo ni la registro, y no la sigo en segundo plano. Al salir de la pantalla o bloquear el iPhone, se detiene."
 
     static let activando = "Activando ubicación. Por favor acepta el permiso."
     static let yaActiva = "La ubicación ya está activa."
