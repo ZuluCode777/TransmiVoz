@@ -21,9 +21,7 @@ struct SesionVista: View {
                     Button(modelo.activa ? "Detener sesión" : "Iniciar sesión simulada") {
                         if modelo.activa { modelo.detener() } else { modelo.iniciar() }
                     }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.large)
-                    .frame(minHeight: 44)
+                    .buttonStyle(EstiloBotonPrimario())
                     .accessibilityIdentifier("boton-sesion")
 
                     VStack(alignment: .leading, spacing: 8) {
@@ -45,6 +43,7 @@ struct SesionVista: View {
                 }
                 .padding(16)
             }
+            .pantallaWeb()
             .navigationTitle("Sesión")
             .navigationBarTitleDisplayMode(.inline)
             .bordeInferiorLegible()

@@ -41,12 +41,30 @@ final class ClientePlanificadorFalso: ClientePlanificador, @unchecked Sendable {
     let detalles = RespuestasControlables<DetalleRuta>()
     let lugares = RespuestasControlables<ListaLugares>()
     let viajes = RespuestasControlables<PlanViaje>()
+    let metros = RespuestasControlables<RespuestaMetro>()
+    let cercanas = RespuestasControlables<RespuestaEstacionesCercanas>()
+
+    private let candadoLecturas = NSLock()
+    private var enviadas: [LecturaParaEnviar] = []
+    /// Las lecturas que recibió `estacionesCercanas`, en orden.
+    var lecturas: [LecturaParaEnviar] { candadoLecturas.lock(); defer { candadoLecturas.unlock() }; return enviadas }
 
     func buscarRutas(consulta: String) async throws -> ResultadoBusquedaRutas { try await busquedas.recibir(consulta) }
     func detalleRuta(codigo: String) async throws -> DetalleRuta { try await detalles.recibir(codigo) }
     func listarLugares() async throws -> ListaLugares { try await lugares.recibir("") }
     func planearViaje(origen: String, destino: String) async throws -> PlanViaje {
         try await viajes.recibir("\(origen)|\(destino)")
+    }
+    func metroLinea1() async throws -> RespuestaMetro { try await metros.recibir("metro-linea-1") }
+    func estacionesCercanas(_ lectura: LecturaParaEnviar) async throws -> RespuestaEstacionesCercanas {
+        registrar(lectura)
+        return try await cercanas.recibir("estaciones-cercanas")
+    }
+
+    private func registrar(_ lectura: LecturaParaEnviar) {
+        candadoLecturas.lock()
+        enviadas.append(lectura)
+        candadoLecturas.unlock()
     }
 }
 

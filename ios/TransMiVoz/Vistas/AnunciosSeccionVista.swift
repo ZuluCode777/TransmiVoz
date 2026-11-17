@@ -69,7 +69,7 @@ private struct TarjetaFuenteAnuncios: View {
             }
 
             if modelo.consultando {
-                ProgressView(TextoAnuncios.consultando)
+                ProgresoWeb(texto: TextoAnuncios.consultando)
                     .accessibilityIdentifier("anuncios-progreso")
             }
 
@@ -77,8 +77,6 @@ private struct TarjetaFuenteAnuncios: View {
                 Task { await modelo.actualizar() }
             }
             .accion(prominente: false, disponible: !modelo.consultando)
-            .controlSize(.large)
-            .frame(minHeight: 44)
             .accessibilityIdentifier("boton-actualizar-anuncios")
         }
     }
@@ -126,7 +124,9 @@ private struct TarjetaAnuncio: View {
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
+        .foregroundStyle(Paleta.mutedForeground)
+        .background(Paleta.muted, in: RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Paleta.border, lineWidth: Tema.borde))
     }
 
     private func identificador(_ campo: String) -> String { "anuncio-\(anuncio.identificador)-\(campo)" }

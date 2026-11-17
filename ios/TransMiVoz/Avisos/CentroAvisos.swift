@@ -38,7 +38,9 @@ final class CentroAvisos {
     /// único canal de VoiceOver para ese resultado: no se anuncia además, para que no se lea dos veces.
     private(set) var repeticiones = 0
 
-    @ObservationIgnored private let voz: ControlVoz
+    /// La voz de la app (`ControlVoz`, dueño único del audio): la misma de la consulta y del accesorio. Otras pantallas con voz
+    /// (Emergencia) hablan por ella y no abren otra sesión de audio.
+    @ObservationIgnored let voz: ControlVoz
     @ObservationIgnored private let reloj: RelojMonotonico
     /// Instantes de las últimas voces de cada clase, para el límite de ritmo.
     @ObservationIgnored private var voces: [TipoAviso: [Milisegundos]] = [:]

@@ -17,6 +17,9 @@ struct ConsultaVista: View {
     @State private var creacionDiferida = UIApplication.shared.preferredContentSizeCategory.isAccessibilityCategory
     /// Estado de la consulta cuyo anuncio y foco esperan a que se cierre el micrófono: VoiceOver sonaría sobre la captura.
     @State private var anuncioDiferido: EstadoConsulta?
+    /// La pestaña está a la vista. La consulta se comparte con la pantalla de voz de Ceguera total (`AgenteTotalVista`): una
+    /// respuesta pedida allí no se anuncia ni mueve el foco desde aquí, donde nadie la está mirando.
+    @State private var visible = false
 
     var body: some View {
         NavigationStack {
@@ -58,8 +61,7 @@ struct ConsultaVista: View {
                             // Por `editarTexto`: una edición de la persona deja de contar como «lo dictado».
                             TextField("Pregunta", text: Binding(get: { modelo.texto }, set: { modelo.editarTexto($0) }), axis: .vertical)
                                 .lineLimit(1...5)
-                                .textFieldStyle(.roundedBorder)
-                                .frame(minHeight: 44)
+                                .campoWeb()
                                 .focused($campoEnfocado)
                                 .submitLabel(.send)
                                 .onSubmit { enviar() }
@@ -74,16 +76,12 @@ struct ConsultaVista: View {
 
                             HStack(spacing: 12) {
                                 Button("Enviar") { enviar() }
-                                    .buttonStyle(.borderedProminent)
-                                    .controlSize(.large)
-                                    .frame(minHeight: 44)
+                                    .buttonStyle(EstiloBotonPrimario())
                                     .disabled(modelo.estaEnviando)
                                     .accessibilityIdentifier("boton-enviar")
                                 if modelo.estaEnviando {
                                     Button("Cancelar") { modelo.cancelar() }
-                                        .buttonStyle(.bordered)
-                                        .controlSize(.large)
-                                        .frame(minHeight: 44)
+                                        .buttonStyle(EstiloBotonSecundario())
                                         .accessibilityIdentifier("boton-cancelar")
                                 }
                             }
@@ -98,12 +96,14 @@ struct ConsultaVista: View {
                 .scrollDismissesKeyboard(.interactively)
                 .bordeInferiorLegible()
             }
+            .pantallaWeb()
             .navigationTitle("Consulta")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) { EnlaceRutasConsulta() }
             }
             .onChange(of: modelo.estado) { _, nuevo in
+                guard visible else { return }
                 // Con el micrófono abierto no se anuncia ni se mueve el foco: se hace al cerrarlo, con el estado de entonces.
                 if modelo.dictado?.capturando == true { anuncioDiferido = nuevo } else { anuncioDiferido = nil; anunciar(nuevo) }
             }
@@ -117,7 +117,10 @@ struct ConsultaVista: View {
             .onChange(of: modelo.dictado?.estado) { _, nuevo in
                 if nuevo?.esProblema == true { foco = .dictado }
             }
-            .onAppear { modelo.dictado?.actualizarCapacidad() }
+            .onAppear {
+                visible = true
+                modelo.dictado?.actualizarCapacidad()
+            }
             // En segundo plano no hay micrófono ni voz: se invalida lo mismo que al salir. Inactiva no cuenta: los avisos de
             // permiso del sistema dejan la escena inactiva mientras la persona responde.
             .onChange(of: faseEscena) { _, nueva in
@@ -126,7 +129,10 @@ struct ConsultaVista: View {
         }
         // `TabView` conserva el modelo al cambiar de pestaña: una consulta lenta no
         // debe terminar fuera de pantalla (arquitectura §7). Cancela la vigente, el dictado y la voz de la respuesta.
-        .onDisappear { modelo.salir() }
+        .onDisappear {
+            visible = false
+            modelo.salir()
+        }
     }
 
     /// Cierra el teclado antes de dictar: el micrófono y el teclado no se disputan el campo.
@@ -179,13 +185,10 @@ private struct BotonEscenario: View {
             modelo.escenario = nuevo
             AccessibilityNotification.Announcement(nuevo.anuncioAlElegir).post()
         } label: {
-            // El área táctil va dentro de la etiqueta: fuera del botón no ampliaría lo que recibe el toque.
             Text("Metro (futuro)")
-                .font(.subheadline)
-                .frame(minWidth: 44, minHeight: 44)
-                .contentShape(Rectangle())
         }
-        .buttonStyle(.bordered)
+        // Estilo de la web con contraste medido (el `.bordered` del sistema no pasa la auditoría); su área táctil mide 44 pt.
+        .buttonStyle(EstiloBotonPildora())
         .accessibilityValue(modelo.escenario.valorSelector)
         .accessibilityHint(modelo.escenario.pistaSelector)
         .accessibilityIdentifier("boton-escenario")
@@ -204,9 +207,7 @@ private struct OrigenPendienteVista: View {
                 .accessibilityHint("Tu próxima pregunta se toma como el destino.")
                 .accessibilityIdentifier("origen-pendiente")
             Button("Olvidar origen", action: alOlvidar)
-                .buttonStyle(.bordered)
-                .controlSize(.large)
-                .frame(minHeight: 44)
+                .buttonStyle(EstiloBotonSecundario())
                 .accessibilityIdentifier("boton-olvidar-origen")
         }
     }
@@ -225,9 +226,7 @@ private struct ControlDictadoVista: View {
             Button(action: alAlternar) {
                 Label(TextoDictado.boton(dictado.estado), systemImage: dictado.estado.enCurso ? "stop.circle.fill" : "mic.fill")
             }
-            .buttonStyle(.bordered)
-            .controlSize(.large)
-            .frame(minHeight: 44)
+            .buttonStyle(EstiloBotonSecundario())
             .accessibilityValue(TextoDictado.valor(dictado.estado))
             .accessibilityHint(TextoDictado.pista(dictado.estado, capacidad: dictado.capacidad))
             .accessibilityIdentifier("boton-dictar")
@@ -248,9 +247,7 @@ private struct ControlDictadoVista: View {
                 Button(TextoDictado.abrirAjustes) {
                     if let url = URL(string: UIApplication.openSettingsURLString) { abrirURL(url) }
                 }
-                .buttonStyle(.bordered)
-                .controlSize(.large)
-                .frame(minHeight: 44)
+                .buttonStyle(EstiloBotonSecundario())
                 .accessibilityIdentifier("boton-abrir-ajustes-dictado")
             }
         }
@@ -300,7 +297,7 @@ private struct ResultadoConsultaVista: View {
         case .inactiva:
             EmptyView()
         case .enviando:
-            ProgressView("Consultando al servidor…")
+            ProgresoWeb(texto: "Consultando al servidor…")
                 .accessibilityIdentifier("progreso-consulta")
         case .respuesta(let respuesta):
             RespuestaVista(
@@ -316,9 +313,7 @@ private struct ResultadoConsultaVista: View {
                 Text(error.recuperacion).foregroundStyle(.textoSecundario)
                 if error.admiteReintento && modelo.ultimoTextoEnviado != nil {
                     Button(modelo.etiquetaDeRepetir("Reintentar")) { alReintentar() }
-                        .buttonStyle(.bordered)
-                        .controlSize(.large)
-                        .frame(minHeight: 44)
+                        .buttonStyle(EstiloBotonSecundario())
                         .accessibilityIdentifier("boton-reintentar")
                 }
             }
@@ -331,9 +326,7 @@ private struct ResultadoConsultaVista: View {
                 Text("No se mostrará ninguna respuesta de esa pregunta.")
                 if modelo.ultimoTextoEnviado != nil {
                     Button(modelo.etiquetaDeRepetir("Reintentar")) { alReintentar() }
-                        .buttonStyle(.bordered)
-                        .controlSize(.large)
-                        .frame(minHeight: 44)
+                        .buttonStyle(EstiloBotonSecundario())
                         .accessibilityIdentifier("boton-reintentar")
                 }
             }
@@ -412,8 +405,9 @@ private struct RespuestaVista: View {
         }
     }
 
-    /// Lo que la web abre con esta acción y el iPhone también tiene (EA-25): el detalle de una ruta con su mapa, y las
-    /// rutas que pasan por una estación. Sin servicios de rutas en el entorno no se ofrece nada.
+    /// Lo que la web abre con esta acción y el iPhone también tiene: el detalle de una ruta con su mapa, las rutas que pasan por
+    /// una estación, las rutas frecuentes y «Mapa y GPS» (que solo pide la ubicación cuando la persona la activa allí). Ninguna
+    /// navega sola. Sin servicios de rutas en el entorno (solo en vistas previas) no se ofrece nada.
     private struct EnlaceDeAccion: View {
         let accion: AccionAgente
         @Environment(\.serviciosRutas) private var servicios
@@ -428,8 +422,7 @@ private struct RespuestaVista: View {
                         Label("Ver la ruta \(codigo) y su mapa", systemImage: "map")
                             .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
                     }
-                    .buttonStyle(.bordered)
-                    .controlSize(.large)
+                    .buttonStyle(EstiloBotonSecundario())
                     .accessibilityIdentifier("enlace-ruta-detalle")
                 case .busqueda(let estacion):
                     NavigationLink {
@@ -438,10 +431,27 @@ private struct RespuestaVista: View {
                         Label("Ver las rutas que pasan por la estación", systemImage: "list.bullet")
                             .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
                     }
-                    .buttonStyle(.bordered)
-                    .controlSize(.large)
+                    .buttonStyle(EstiloBotonSecundario())
                     .accessibilityIdentifier("enlace-rutas-estacion")
-                case .ninguna, .frecuentes, .gps, .viaje:
+                case .frecuentes:
+                    NavigationLink {
+                        FavoritasVista(modelo: servicios.favoritas)
+                    } label: {
+                        Label("Ver mis rutas frecuentes", systemImage: "heart")
+                            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                    }
+                    .buttonStyle(EstiloBotonSecundario())
+                    .accessibilityIdentifier("enlace-rutas-frecuentes-consulta")
+                case .gps:
+                    NavigationLink {
+                        GpsAuditivoVista(servicios: servicios)
+                    } label: {
+                        Label("Abrir Mapa y GPS", systemImage: "map")
+                            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                    }
+                    .buttonStyle(EstiloBotonSecundario())
+                    .accessibilityIdentifier("enlace-gps")
+                case .ninguna, .viaje:
                     EmptyView()
                 }
             }
@@ -456,9 +466,7 @@ private struct RespuestaVista: View {
             Text("El servidor respondió con datos de TransMilenio que no están actualizados: una copia guardada o una consulta vencida. Vuelve a consultar en unos minutos.")
                 .accessibilityIdentifier("aviso-catalogo-antiguo")
             Button(etiquetaVolver) { alReintentar() }
-                .buttonStyle(.bordered)
-                .controlSize(.large)
-                .frame(minHeight: 44)
+                .buttonStyle(EstiloBotonSecundario())
                 .accessibilityIdentifier("boton-volver-a-consultar")
         }
     }

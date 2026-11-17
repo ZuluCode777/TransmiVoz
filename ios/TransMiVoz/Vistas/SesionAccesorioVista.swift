@@ -92,6 +92,7 @@ struct SesionAccesorioVista: View {
                 }
                 .padding(16)
             }
+            .pantallaWeb()
             .navigationTitle("Sesión")
             .navigationBarTitleDisplayMode(.inline)
             .bordeInferiorLegible()
@@ -116,8 +117,7 @@ struct SesionAccesorioVista: View {
                 Button("Abrir Ajustes") {
                     if let url = URL(string: UIApplication.openSettingsURLString) { abrirURL(url) }
                 }
-                .buttonStyle(.bordered)
-                .frame(minHeight: 44)
+                .buttonStyle(EstiloBotonSecundario(compacto: true))
                 .accessibilityIdentifier("boton-abrir-ajustes")
             }
         }
@@ -135,8 +135,7 @@ struct SesionAccesorioVista: View {
             Button(modelo.busquedaPedida ? "Dejar de buscar" : "Buscar accesorios") {
                 if modelo.busquedaPedida { modelo.dejarDeBuscar() } else { modelo.buscar() }
             }
-            .buttonStyle(.bordered)
-            .frame(minHeight: 44)
+            .buttonStyle(EstiloBotonSecundario(compacto: true))
             .accessibilityIdentifier("boton-buscar")
 
             // «Buscando» solo con escaneo real; con la búsqueda pedida pero sin poder escanear se dice por qué.
@@ -151,8 +150,7 @@ struct SesionAccesorioVista: View {
             }
             ForEach(modelo.encontrados) { accesorio in
                 Button("Elegir \(accesorio.etiqueta)") { modelo.elegir(accesorio) }
-                    .buttonStyle(.bordered)
-                    .frame(minHeight: 44)
+                    .buttonStyle(EstiloBotonSecundario(compacto: true))
                     .accessibilityAddTraits(modelo.elegido?.id == accesorio.id ? .isSelected : [])
                     .accessibilityIdentifier("elegir-\(accesorio.id)")
             }
@@ -169,16 +167,12 @@ struct SesionAccesorioVista: View {
             Button(modelo.activa ? "Detener sesión" : "Iniciar sesión") {
                 if modelo.activa { modelo.detener() } else { modelo.iniciar() }
             }
-            .accion(prominente: true, disponible: modelo.elegido != nil)
-            .controlSize(.large)
-            .frame(minHeight: 44)
+            .accion(prominente: true, disponible: modelo.elegido != nil, compacta: true)
             .accessibilityHint(modelo.elegido == nil ? "Primero elige un accesorio" : "")
             .accessibilityIdentifier("boton-sesion-accesorio")
 
             Button("Reconectar") { modelo.reconectar() }
-                .accion(prominente: false, disponible: modelo.elegido != nil)
-                .controlSize(.large)
-                .frame(minHeight: 44)
+                .accion(prominente: false, disponible: modelo.elegido != nil, compacta: true)
                 .accessibilityHint(modelo.elegido == nil ? "Primero elige un accesorio" : "")
                 .accessibilityIdentifier("boton-reconectar")
         }
@@ -229,6 +223,7 @@ struct SesionAccesorioVista: View {
                     Text(TextoPreferencias.etiquetaVoz)
                         .accessibilityIdentifier("etiqueta-interruptor-voz-app")
                 }
+                .tint(Paleta.ok)
                 .frame(minHeight: 44)
                 .accessibilityIdentifier("interruptor-voz-app")
             Text("Con VoiceOver activo empieza apagada para no hablar dos veces. Los avisos del sensor nunca se leen con VoiceOver: solo salen por auriculares y quedan en pantalla.")
@@ -253,14 +248,10 @@ struct HojaPermisoBluetooth: View {
                         .fixedSize(horizontal: false, vertical: true)
                         .accessibilityIdentifier("texto-permiso-bluetooth")
                     Button("Continuar", action: continuar)
-                        .buttonStyle(.borderedProminent)
-                        .controlSize(.large)
-                        .frame(minHeight: 44)
+                        .buttonStyle(EstiloBotonPrimario())
                         .accessibilityIdentifier("boton-permiso-continuar")
                     Button("Ahora no", action: ahoraNo)
-                        .buttonStyle(.bordered)
-                        .controlSize(.large)
-                        .frame(minHeight: 44)
+                        .buttonStyle(EstiloBotonSecundario())
                         .accessibilityIdentifier("boton-permiso-ahora-no")
                     Text(TextoAccesorio.permisoBluetoothAlternativa)
                         .font(.footnote)
@@ -269,6 +260,7 @@ struct HojaPermisoBluetooth: View {
                 }
                 .padding(16)
             }
+            .pantallaWeb()
             .navigationTitle(TextoAccesorio.permisoBluetoothTitulo)
             .navigationBarTitleDisplayMode(.inline)
         }

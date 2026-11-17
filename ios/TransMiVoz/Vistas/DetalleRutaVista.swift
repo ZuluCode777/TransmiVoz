@@ -5,14 +5,22 @@ enum ZonaFocoRutas: Hashable { case resultado }
 
 /// Detalle de una ruta: sentido, horario, estaciones y mapa del MISMO recorrido. El servidor decide cada estado
 /// (`sentido`, `calendario`, `paradaVerificada`); aquí solo se dicen. Lo esencial está en el listado, no en el mapa.
+///
+/// Como en la web: «Escuchar» lee la ruta en voz alta con la voz de la app, y el detalle se vuelve a consultar cada 30 s
+/// mientras la pantalla se ve (el calendario y las paradas verificadas pueden vencer aunque el catálogo no cambie).
 struct DetalleRutaVista: View {
     let servicios: ServiciosRutas
     @State private var modelo: DetalleRutaModelo
+    @State private var escucha: EscuchaRutaModelo
+    /// La pantalla está a la vista: con ella en segundo plano, o con otra encima, el reloj de 30 s no corre.
+    @State private var aLaVista = false
     @AccessibilityFocusState private var foco: ZonaFocoRutas?
+    @Environment(\.scenePhase) private var faseEscena
 
     init(servicios: ServiciosRutas, codigo: String) {
         self.servicios = servicios
         _modelo = State(initialValue: DetalleRutaModelo(codigo: codigo, cliente: servicios.cliente))
+        _escucha = State(initialValue: EscuchaRutaModelo(voz: servicios.voz, dictado: servicios.dictado))
     }
 
     var body: some View {
@@ -22,7 +30,7 @@ struct DetalleRutaVista: View {
                 case .inactivo:
                     EmptyView()
                 case .cargando:
-                    ProgressView(TextoRutas.cargandoDetalle)
+                    ProgresoWeb(texto: TextoRutas.cargandoDetalle)
                         .accessibilityIdentifier("progreso-detalle-ruta")
                 case .fallo(let error):
                     ErrorRutasVista(error: error, foco: $foco, alReintentar: { modelo.cargar() })
@@ -32,11 +40,31 @@ struct DetalleRutaVista: View {
             }
             .padding(16)
         }
+        .bordeSuperiorNitido()
+        .pantallaWeb()
         .navigationTitle(TextoRutas.tituloDetalle(modelo.codigo))
         .navigationBarTitleDisplayMode(.inline)
         .bordeInferiorLegible()
         .task { modelo.cargarSiHaceFalta() }
-        .onChange(of: modelo.estado) { _, nuevo in
+        .onAppear {
+            aLaVista = true
+            modelo.pantallaVisible(faseEscena == .active)
+        }
+        .onDisappear {
+            aLaVista = false
+            modelo.pantallaVisible(false)
+            escucha.detener()
+        }
+        .onChange(of: faseEscena) { _, nueva in
+            modelo.pantallaVisible(aLaVista && nueva == .active)
+            if nueva != .active { escucha.detener() }
+        }
+        .onChange(of: escucha.mensaje) { _, nuevo in
+            if let nuevo { AccessibilityNotification.Announcement(nuevo).post() }
+        }
+        .onChange(of: modelo.estado) { anterior, nuevo in
+            // La consulta periódica cambia un detalle ya mostrado por otro: no se anuncia ni se mueve el foco.
+            if case .listo = anterior, case .listo = nuevo { return }
             switch nuevo {
             case .listo:
                 AccessibilityNotification.Announcement("Ruta cargada.").post()
@@ -68,7 +96,28 @@ struct DetalleRutaVista: View {
             Text(frase).accessibilityIdentifier("aviso-sentido")
         }
 
+        if modelo.refrescoFallido {
+            Text(TextoRutas.actualizacionFallida)
+                .font(.footnote.bold())
+                .accessibilityIdentifier("aviso-actualizacion-rutas")
+        }
+
         CatalogoVista(catalogo: detalle.catalogo, alVolverAConsultar: { modelo.cargar() })
+
+        // «Escuchar» de la web: lee la ruta por la voz de la app. Si no suena, el mensaje dice por qué.
+        VStack(alignment: .leading, spacing: 8) {
+            Button {
+                escucha.escuchar(TextoRutas.descripcionHablada(detalle))
+            } label: {
+                Label(TextoRutas.escuchar, systemImage: "speaker.wave.2.fill")
+            }
+            .buttonStyle(EstiloBotonSecundario())
+            .accessibilityHint(TextoRutas.pistaEscuchar)
+            .accessibilityIdentifier("boton-escuchar")
+            if let mensaje = escucha.mensaje {
+                Text(mensaje).foregroundStyle(.textoSecundario).accessibilityIdentifier("mensaje-escuchar")
+            }
+        }
 
         BotonFavorita(codigo: detalle.codigo, favoritas: servicios.favoritas)
 
@@ -132,8 +181,7 @@ private struct BotonFavorita: View {
             Label(guardada ? TextoRutas.quitar : TextoRutas.guardar, systemImage: guardada ? "heart.fill" : "heart")
                 .frame(minHeight: 44)
         }
-        .buttonStyle(.bordered)
-        .controlSize(.large)
+        .buttonStyle(EstiloBotonSecundario())
         .accessibilityLabel(guardada ? TextoRutas.etiquetaQuitar(codigo) : TextoRutas.etiquetaGuardar(codigo))
         .accessibilityIdentifier("boton-favorita")
     }
@@ -155,9 +203,7 @@ struct CatalogoVista: View {
                 Text(TextoRutas.catalogoAntiguo).accessibilityIdentifier("aviso-catalogo-antiguo")
                 Text(TextoRutas.catalogoAntiguoAyuda)
                 Button(TextoRutas.volverAConsultar) { alVolverAConsultar() }
-                    .buttonStyle(.bordered)
-                    .controlSize(.large)
-                    .frame(minHeight: 44)
+                    .buttonStyle(EstiloBotonSecundario())
                     .accessibilityIdentifier("boton-volver-a-consultar-rutas")
             }
         }
@@ -180,9 +226,7 @@ struct ErrorRutasVista: View {
             Text(error.recuperacion).foregroundStyle(.textoSecundario)
             if error.admiteReintento {
                 Button("Reintentar") { alReintentar() }
-                    .buttonStyle(.bordered)
-                    .controlSize(.large)
-                    .frame(minHeight: 44)
+                    .buttonStyle(EstiloBotonSecundario())
                     .accessibilityIdentifier("boton-reintentar-rutas")
             }
         }
