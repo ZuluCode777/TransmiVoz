@@ -108,8 +108,8 @@ Cinco pestañas, en este orden (`RaizVista`, `PestanaRaiz`): **Inicio** (la de p
 
 ## Pruebas
 
-- `PaletaTests` (CI): los contrastes de cada par letra/fondo en claro y oscuro (≥ 7:1), el contorno y el foco (≥ 3:1) y algunos hex.
-- `ModoAppModeloTests`, `TextoInicioTests`: lógica sin SwiftUI (también corren en Linux).
+- `PaletaTests` (CI): los contrastes de cada par letra/fondo en claro y oscuro (≥ 7:1, incluido el texto secundario sobre la pantalla y sobre las tarjetas), el contorno y el foco (≥ 3:1), que el texto secundario es el token opaco de la paleta y algunos hex.
+- `ModoAppModeloTests`, `AltoContrasteModeloTests`, `TextoInicioTests`: lógica sin SwiftUI (también corren en Linux; 20 de 20 el 16/11/2026, con el ajuste de siempre para las clases `@MainActor`).
 - `TransMiVozInicioUITests`: pestañas (cinco, Inicio primera y seleccionada, sin Lupa), cabecera, seis baldosas (orden, título, 44 pt, tocables), cada baldosa abre lo suyo, el menú de modo (cambia el Inicio, marca el activo, se cierra), la campana, y la auditoría de accesibilidad de Inicio y del menú. `TransMiVozInicioTextoGrandeUITests`: Inicio con `AccessibilityXXXL`, cada baldosa entera a la vista y auditada.
 - Pruebas existentes cambiadas por la navegación (sin tocar ayudantes, tolerancias ni grupos de auditoría): las del accesorio abren primero la pestaña Sesión (antes era la primera) con el nuevo `abrirSesion`; las de la lupa la abren desde la baldosa de Inicio y «volver a la lupa» es volver a la pestaña Inicio.
 
@@ -134,6 +134,15 @@ Además: fondo y tinta de la paleta en todas las pantallas (`.pantallaWeb()`), t
 
 La auditoría nativa de contraste también mide los nodos que quedan **bajo** el área desplazable (entre su borde, 775 pt en el Simulator iPhone 17, y el final de la pantalla): los mide sobre la barra de pestañas y fallan. Por eso una auditoría de una sola posición solo pasa si la pantalla **cabe entera**; las largas usan las fases con contraste diferido (`FaseAuditada`, `AuditoriaFase`, `RecorridoAuditado`). El pase visual respeta ese margen: no añade tarjetas ni cambia la letra del cuerpo, los campos conservan su alto y la sesión del accesorio usa los botones compactos (48 pt) para que «Reconectar» siga entero a la vista en la posición de arriba.
 
+### Pruebas que cambiaron de método (sin aflojar ninguna aserción)
+
+Van en un commit aparte, para poder revisarlas o revertirlas solas. No se tocó ningún umbral, plazo, reintento, filtro ni omisión.
+
+- **Ocho auditorías de pantallas más largas que la vista** dejan de auditar una sola posición y recorren la pantalla entera con `auditarPantallaLarga` (`RecorridoAuditado`, que ya usaba el asistente de voz con el texto más grande): `agente-total-reposo` y `-respuesta`, `-escuchando`, `-sin-permiso`, `metro-listo`, `gps-activo`, `gps-denegado`, `gps-error` y `rutas-resultados`. En la ejecución de `4a6871f` sus hallazgos de contraste eran nodos bajo el área desplazable (por ejemplo «agente-total-enlace-gps» en y 747…803 y «procedencia-catalogo» en y 843…859, con la vista en 116…775): el sistema los mide sobre la barra de pestañas, así que una pantalla que no cabe entera no puede pasar en una sola posición con ningún color. Es la regla de las fases de Inicio, el accesorio, Emergencia y Diagnóstico: el contraste de un nodo recortado se difiere y ese mismo nodo debe medirse entero y sin problema en otra posición, o la prueba falla; un problema de un nodo entero a la vista, o de otro tipo, falla en el acto. Ahora se audita toda la pantalla, no solo su comienzo.
+- `RecorridoAuditado` toma como borde superior de la vista el mayor entre la barra de navegación y el área desplazable (como `FaseAuditada`): bajo la barra de Inicio está la fila fija de la cabecera.
+- `testLosControlesMidenAlMenos44Puntos` (GPS) visita los mismos siete controles en el orden de la pantalla: su `exponer` solo desplaza hacia delante y «gps-mapas-0» está por encima de «gps-orientar-3».
+- **Riesgo conocido:** en `gps-activo` y `gps-error` la línea de antigüedad cambia de texto cada segundo; si el recorrido la mide recortada, su deuda (identificador y etiqueta) no se salda con otra etiqueta y la prueba fallará. No se relajó esa identidad: lo dirá la ejecución nativa.
+
 ### Lo que NO hizo
 
 - **Los diseños con el texto muy grande (`AccessibilityXXXL`) siguen pendientes por decisión del dueño.** No se repararon, Dynamic Type sigue activo y las doce clases `…TextoGrandeUITests` siguen fuera de la CI (ver [ios-ci.md](ios-ci.md)).
@@ -143,4 +152,6 @@ La auditoría nativa de contraste también mide los nodos que quedan **bajo** el
 
 ## Sin verificar
 
-Todo SwiftUI y UIKit de esta entrega hasta que corra la CI de macOS y, después, un iPhone: la compilación, la letra registrada (`UIAppFonts` con `INFOPLIST_FILE` mezclado con las claves generadas, y su respaldo), el aspecto de las barras con Liquid Glass de iOS 26, el título central de la barra con el texto más grande, el ciclo de vida de la cámara de la lupa al cambiar de pestaña con la lupa empujada, y las auditorías de accesibilidad nuevas. VoiceOver real no se probó.
+**Del pase visual:** nada de SwiftUI se compiló ni se ejecutó donde se escribió (Linux, sin Xcode): solo el análisis sintáctico de todo el Swift y las pruebas de `ModoApp`. Quedan por demostrar en la CI de macOS la compilación, que cada control restilado pase la auditoría nativa, la medida real de los botones de la cabecera, que la ficha del bus quepa en la barra, el interruptor «Alto contraste» (`preferredColorScheme` sobre las barras de UIKit) y las ocho auditorías recorridas. La paleta oscura no la recorre ninguna prueba de interfaz. Ni VoiceOver ni un iPhone.
+
+**De la base:** todo SwiftUI y UIKit de esta entrega hasta que corra la CI de macOS y, después, un iPhone: la compilación, la letra registrada (`UIAppFonts` con `INFOPLIST_FILE` mezclado con las claves generadas, y su respaldo), el aspecto de las barras con Liquid Glass de iOS 26, el título central de la barra con el texto más grande, el ciclo de vida de la cámara de la lupa al cambiar de pestaña con la lupa empujada, y las auditorías de accesibilidad nuevas. VoiceOver real no se probó.

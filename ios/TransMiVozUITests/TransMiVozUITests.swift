@@ -2105,7 +2105,8 @@ final class TransMiVozRutasUITests: RutasUITestCase {
         abrirRutas()
         buscar("z99")
         XCTAssertTrue(elemento("ruta-Z99").waitForExistence(timeout: 10))
-        try auditar(app, "rutas-resultados", testCase: self)
+        // Con resultados la pantalla mide más que la vista: la auditoría la recorre entera (`auditarPantallaLarga`).
+        try auditarPantallaLarga(app, "rutas-resultados", caso: self)
     }
 
     func testAuditoriaAccesibilidadViajeAntesDePlanear() throws {
