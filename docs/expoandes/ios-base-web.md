@@ -6,7 +6,7 @@ Todo lo de este documento es **software sin compilar donde se escribió** (no ha
 
 ## Paleta
 
-`ios/TransMiVoz/Vistas/Tema.swift`, `enum Paleta`. Un `Color` por token de `app/globals.css`, con el mismo nombre en camelCase (`--brand-soft` es `Paleta.brandSoft`), dinámico: claro es `:root`; oscuro es `.fluor` (el «Alto contraste» de la web: negro con neón). **La web elige `.fluor` con un interruptor; el iPhone sigue la apariencia del sistema** (decisión del encargo). Los tokens que `.fluor` no cambia valen lo mismo en oscuro, como en la web.
+`ios/TransMiVoz/Vistas/Tema.swift`, `enum Paleta`. Un `Color` por token de `app/globals.css`, con el mismo nombre en camelCase (`--brand-soft` es `Paleta.brandSoft`), dinámico: claro es `:root`; oscuro es `.fluor` (el «Alto contraste» de la web: negro con neón). **La web elige `.fluor` con un interruptor; el iPhone sigue la apariencia del sistema hasta que la persona elige** con el interruptor «Alto contraste (colores fluorescentes)» de Ajustes ▸ Preferencias (`AltoContrasteModelo`, guardado con la clave y los valores de la web: `transmivoz-fluor` = `on` | `off`). Desde entonces manda su elección (`RaizVista` fija `preferredColorScheme`); sin elección no se guarda nada. Los tokens que `.fluor` no cambia valen lo mismo en oscuro, como en la web.
 
 Los valores `oklch` se pasaron a sRGB con la reducción de croma de CSS Color 4 (JND 0,02). Con esos hex se midieron los contrastes que declara el CSS: 17,9:1 negro sobre lima, de 7,96 a 19,6:1 sobre los neones, 7,5:1 sobre el rojo de Emergencia, 7,2:1 el blanco sobre el rojo oscuro. `PaletaTests` los vuelve a medir en la CI. En un iPhone, Safari pinta en Display P3 los `oklch` que salen de sRGB (más saturados); aquí quedan recortados a sRGB, algo menos saturados (diferencia visual no medida).
 
@@ -61,7 +61,7 @@ Los valores `oklch` se pasaron a sRGB con la reducción de croma de CSS Color 4 
 
 Medidas (`enum Tema`): `radio` 10 (`--radius`), `radioXL` 14, `radio2XL` 18 (tarjetas, botones, baldosas), `radio3XL` 22, `borde` 3 (`border-3`), `bordeEmergencia` 5 (`border-5`), `objetivoMinimo` 44.
 
-Lo que **no** cambia: `AccentColor` del catálogo de recursos y los colores del sistema que usan las pantallas existentes (`.borderedProminent`, `textoSecundario`, `rojoAccesible`…). Cada pantalla pasa a la paleta cuando su tarea la restile; `EstilosAccesiblesTests` sigue midiendo `AccentColor`.
+`AccentColor` del catálogo de recursos sigue ahí y `EstilosAccesiblesTests` lo sigue midiendo, pero ninguna pantalla depende ya de él: el [pase visual](#pase-visual-de-tamaño-estándar-16112026) pasó todos los botones, campos, enlaces y textos secundarios a la paleta.
 
 ## Letra
 
@@ -73,10 +73,15 @@ Uso: `.font(.jakarta(.bold, .lg))` es `font-bold text-lg`. Tamaños `sm 14, base
 
 | Web | Swift | Notas |
 | --- | --- | --- |
-| `AppHeader` | `EncabezadoApp` (`ToolbarContent`) | `.toolbar { EncabezadoApp(alAbrirMenu:, alAbrirAvisos:) }` en la raíz de una pestaña. Menú de modo a la izquierda, «TransMiVoz» con su ficha del bus al centro, campana a la derecha. Hoy solo la usa Inicio. |
+| `AppHeader` | `EncabezadoApp` (`View`) y `FichaBusBarra` | Fila fija sobre el área desplazable de la raíz de una pestaña (`VStack(spacing: 0) { EncabezadoApp(alAbrirMenu:, alAbrirAvisos:); … }`): menú de modo a la izquierda, «TransMiVoz» al centro, campana a la derecha, cada botón de 48×48 pt reales. **No va en la barra de navegación**: en iOS 26 la barra limita cada control a 36 pt y no escala el texto (medido en la CI). La barra del sistema queda encima con la ficha del bus (`FichaBusBarra`, decorativa). Hoy solo la usa Inicio. |
 | `ScreenHeader` | `EncabezadoPantalla(titulo:, subtitulo:, simbolo:, alVolver:)` | La banda con ficha, título y subtítulo, al principio del contenido. `alVolver` solo para donde no hay barra de navegación (hojas); en una pantalla empujada el botón «atrás» del sistema hace de «Volver». |
 | Tarjeta (`rounded-2xl border-3 bg-card p-4`) | `.tarjetaWeb(relleno:, tinta:)` | Modificador de vista. |
-| Botón principal / secundario | `.buttonStyle(EstiloBotonPrimario())` / `EstiloBotonSecundario()` | `font-bold text-lg`, 3 pt, mínimo 56 pt. No disponible: borde discontinuo y colores de `EstilosAccesibles` (contraste ≥ 4,5:1, no solo tono). |
+| Botón principal / secundario | `.buttonStyle(EstiloBotonPrimario())` / `EstiloBotonSecundario()` | `font-bold text-lg`, 3 pt, a todo el ancho, mínimo 56 pt (`compacto: true`: 48 pt, para pantallas con muchos controles seguidos, como la sesión del accesorio). No disponible: borde discontinuo y colores de `EstilosAccesibles` (contraste ≥ 4,5:1, no solo tono). `.accion(prominente:disponible:compacta:)` elige el estilo y bloquea con el mismo valor. |
+| Acción destructiva | `EstiloBotonPeligro` | «Quitar», «Olvidar clave»: `bg-sos text-sos-foreground` (7,5:1 en claro, 7,2:1 en oscuro). |
+| Pantalla (`bg-background text-foreground`) | `.pantallaWeb()` | Fondo, tinta y `tint` de la paleta. Va en el área desplazable de cada pantalla, antes de `navigationTitle`. |
+| Campo de texto | `.campoWeb()` | El campo del sistema (su área táctil y su foco) con el contorno de 3 pt de la paleta y al menos 44 pt. |
+| Espera | `ProgresoWeb(texto:)` | `ProgressView` con el rótulo en la tinta de la pantalla (el del sistema lo atenúa). |
+| Enlace de texto | `.enlaceWeb()` | Tinta de la pantalla y subrayado: no depende del color. |
 | Píldora «Volver» | `EstiloBotonPildora` | Usada por `EncabezadoPantalla`. |
 | Baldosa de `PartialHome` | `BaldosaWeb(titulo:, pista:, simbolo:, relleno:, tinta:, colorBorde:, anchoBorde:, identificador:, accion:)` | Botón de 72 pt como mínimo; VoiceOver lee el título y, tras una pausa, la pista. Con el texto más grande pierde el ícono y la flecha (decorativos) para que quepa entera. |
 | `ModeMenu` | `MenuModoVista` | Hoja que abre `RaizVista`. |
@@ -87,18 +92,18 @@ Uso: `.font(.jakarta(.bold, .lg))` es `font-bold text-lg`. Tamaños `sm 14, base
 
 Cinco pestañas, en este orden (`RaizVista`, `PestanaRaiz`): **Inicio** (la de partida), Sesión, Consulta, Avisos, Ajustes. La lupa ya no tiene pestaña.
 
-- **Inicio** (`InicioVista`, `NavigationStack` propia): `EncabezadoApp` en la barra de navegación, la banda «¿Qué necesitas?» y las seis baldosas de `OpcionInicio`, en el orden de la web: Asistente, Rutas, Mapa y GPS, Metro de Bogotá, Lupa y Emergencia al final (contorno de 5 pt, rojo, letra negra en claro y blanca en oscuro).
+- **Inicio** (`InicioVista`, `NavigationStack` propia): `EncabezadoApp` en una fila fija bajo la barra de navegación, la banda «¿Qué necesitas?» y las seis baldosas de `OpcionInicio`, en el orden de la web: Asistente, Rutas, Mapa y GPS, Metro de Bogotá, Lupa y Emergencia al final (contorno de 5 pt, rojo, letra negra en claro y blanca en oscuro).
 - Qué abre cada baldosa: **Asistente** cambia a la pestaña Consulta; **Rutas** empuja `RutasVista`; **Lupa** empuja `LupaVista` (sin su propia `NavigationStack`: la lupa conserva el ciclo de vida de la cámara, se suelta al salir o al cambiar de pestaña); **Mapa y GPS**, **Metro de Bogotá** y **Emergencia** empujan `GpsAuditivoVista`, `MetroVista` y `EmergenciaVista`.
 - **La campana** de la cabecera abre la pestaña Avisos. **El menú** (botón de la izquierda) abre `MenuModoVista`.
 - **Modo** (`ModoApp`, `ModoAppModelo`, `EntornoApp.modo`): Baja visión (`parcial`) o Ceguera total (`total`), guardado en `UserDefaults` con la clave y los valores de la web (`transmivoz-mode` = `parcial` | `total`). Elegir un modo cierra el menú, vuelve a Inicio y lo anuncia («Modo baja visión activado.»). Hoy solo cambia el Inicio: Baja visión muestra las baldosas y Ceguera total muestra `AgenteTotalVista`. **Ese es el gancho del Inicio de voz.** En las pruebas de interfaz el modo parte siempre de Baja visión y no persiste.
 - **Barras**: `AparienciaApp.aplicar()` (UIKit, al arrancar) pinta las barras de navegación y de pestañas con `bar`, la letra y los íconos con `foreground` y el filo con `border`. El contorno de las barras es el filo de 1 px del sistema, no los 3 px de la web.
-- **Cabecera en el resto de pantallas**: la web la muestra siempre. Hoy solo Inicio la lleva; las demás pestañas conservan su barra de navegación con título (solo pintada con la paleta). Añadirla a una pantalla es un `.toolbar { EncabezadoApp(…) }`, pero choca con el botón «atrás» del sistema en las pantallas empujadas: decidirlo por pantalla.
+- **Cabecera en el resto de pantallas**: la web la muestra siempre. Hoy solo Inicio la lleva; las demás pestañas conservan su barra de navegación con título (solo pintada con la paleta). Añadirla a otra raíz de pestaña es poner `EncabezadoApp(…)` como fila fija sobre su contenido; en las pantallas empujadas manda el botón «atrás» del sistema.
 
 ## Para las tareas que siguen
 
 - **Mapa y GPS, Metro, Emergencia, Ceguera total**: reemplazan **el archivo entero** (`GpsAuditivoVista`, `MetroVista`, `EmergenciaVista`, `AgenteTotalVista`). Cada uno trae una sola línea provisional en `textoProvisional` que **no debe llegar a `main`**. Conserven el título de navegación (las pruebas de Inicio abren cada pantalla por él: «Mapa y GPS», «Metro de Bogotá», «Emergencia»).
 - **Cablear una pantalla nueva**: en `InicioVista.pantalla(_:)` (un caso más en `DestinoInicio`), o con `pestana = …` si es una pestaña.
-- **Restilar una pantalla existente**: pasar sus colores a `Paleta`, su letra a `.jakarta(...)`, y armarla con `EncabezadoPantalla`, `.tarjetaWeb()` y los estilos de botón. Mantener los `accessibilityIdentifier`.
+- **Restilar una pantalla existente**: `.pantallaWeb()`, colores de `Paleta`, y armarla con `EncabezadoPantalla`, `.tarjetaWeb()`, `.campoWeb()` y los estilos de botón. Mantener los `accessibilityIdentifier`. Antes de añadir tarjetas, márgenes o letra más ancha a una pantalla con auditoría de una sola posición, leer «Alto de las pantallas» del pase visual.
 - **No cambiar** los ayudantes, tolerancias ni grupos de auditoría de `TransMiVozUITests.swift`.
 
 ## Pruebas
@@ -107,6 +112,34 @@ Cinco pestañas, en este orden (`RaizVista`, `PestanaRaiz`): **Inicio** (la de p
 - `ModoAppModeloTests`, `TextoInicioTests`: lógica sin SwiftUI (también corren en Linux).
 - `TransMiVozInicioUITests`: pestañas (cinco, Inicio primera y seleccionada, sin Lupa), cabecera, seis baldosas (orden, título, 44 pt, tocables), cada baldosa abre lo suyo, el menú de modo (cambia el Inicio, marca el activo, se cierra), la campana, y la auditoría de accesibilidad de Inicio y del menú. `TransMiVozInicioTextoGrandeUITests`: Inicio con `AccessibilityXXXL`, cada baldosa entera a la vista y auditada.
 - Pruebas existentes cambiadas por la navegación (sin tocar ayudantes, tolerancias ni grupos de auditoría): las del accesorio abren primero la pestaña Sesión (antes era la primera) con el nuevo `abrirSesion`; las de la lupa la abren desde la baldosa de Inicio y «volver a la lupa» es volver a la pestaña Inicio.
+
+## Pase visual de tamaño estándar (16/11/2026)
+
+Un solo pase sobre la integración funcional (`integracion/feria-13-11`, `4a6871f`). Parte de la ejecución de iOS de esa cabeza (run `43990196510`: 807 pruebas unitarias en verde y 26 fallos en 183 pruebas de interfaz, 25 casos). Nada de esto se compiló ni se vio donde se escribió: ver «Sin verificar».
+
+### Qué fallaba y qué se cambió
+
+| Fallo en la CI | Causa | Cambio |
+| --- | --- | --- |
+| Contraste («failed» o «nearly passed») de `boton-buscar`, `boton-abrir-ajustes`, `elegir-…`, `boton-sesion-accesorio`, `boton-reconectar`, `boton-permiso-continuar` / `-ahora-no` (Bluetooth), `boton-actualizar-anuncios` (Avisos y Anuncios), `boton-permiso-camara-…`, `boton-abrir-ajustes-camara` (lupa), `boton-aplicar` (servidor), `boton-sesion` (sesión simulada), `metro-reintentar` | Los estilos del sistema (`.borderedProminent`, `.bordered`) pintan con el color de acento, que ya no era el azul oscuro medido | Todos pasan a los estilos de la casa: `accion(prominente:disponible:compacta:)` ya no usa estilos del sistema; `EstiloBotonPeligro` para lo destructivo. Lo mismo en las pantallas sin fallo propio (Favoritas, detalle de ruta, Metro, GPS, lupa). |
+| `metro-licencia` «nearly passed» | Enlace con el color de acento | `.enlaceWeb()` y `tint` de la paleta en la raíz |
+| Cabecera: `boton-menu-modo` medía 36 pt; «TransMiVoz» y «Cerrar menú» no escalaban (Dynamic Type) | La barra de navegación de iOS 26 limita cada control a 36 pt y no escala su texto | `EncabezadoApp` es una fila fija del contenido (48×48 pt reales); «Cerrar menú» es una píldora del contenido de la hoja |
+| `agente-total-campo` medía 22 pt | El marco de 44 pt rodeaba el campo, no lo agrandaba | El campo mismo tiene letra `text-xl` y dos renglones como mínimo |
+| `agente-total-motor` no existía | El identificador de la tarjeta de pasos pisaba el de sus hijos | La tarjeta es un contenedor de accesibilidad |
+| «Actualizar» del GPS no decía «Espera unos segundos» | La prueba tardaba más de los 10 s del límite de ritmo en llegar al botón (había que desplazar) | Con la ubicación en uso, «Detener», «Repetir indicación» y «Actualizar» van juntos arriba, a la vista sin desplazar; la explicación de privacidad va primero antes de activar y al final después. Depende del tiempo de la CI: solo una ejecución lo confirma. |
+
+Además: fondo y tinta de la paleta en todas las pantallas (`.pantallaWeb()`), texto secundario opaco (`muted-foreground`), campos con el contorno de la paleta, esperas con su rótulo en la tinta de la pantalla, tarjetas de anuncios en `muted`, filas de rutas como tarjetas, interruptores en `ok`, y el interruptor «Alto contraste».
+
+### Alto de las pantallas
+
+La auditoría nativa de contraste también mide los nodos que quedan **bajo** el área desplazable (entre su borde, 775 pt en el Simulator iPhone 17, y el final de la pantalla): los mide sobre la barra de pestañas y fallan. Por eso una auditoría de una sola posición solo pasa si la pantalla **cabe entera**; las largas usan las fases con contraste diferido (`FaseAuditada`, `AuditoriaFase`, `RecorridoAuditado`). El pase visual respeta ese margen: no añade tarjetas ni cambia la letra del cuerpo, los campos conservan su alto y la sesión del accesorio usa los botones compactos (48 pt) para que «Reconectar» siga entero a la vista en la posición de arriba.
+
+### Lo que NO hizo
+
+- **Los diseños con el texto muy grande (`AccessibilityXXXL`) siguen pendientes por decisión del dueño.** No se repararon, Dynamic Type sigue activo y las doce clases `…TextoGrandeUITests` siguen fuera de la CI (ver [ios-ci.md](ios-ci.md)).
+- La letra del cuerpo sigue siendo la del sistema; Plus Jakarta Sans queda en cabeceras, baldosas y botones.
+- Los mapas (`MapaRecorridoVista`, `MapaGpsVista`, `MapaMetroVista`) conservan sus colores de MapKit; no se dibuja el Metro en los mapas de ruta, viaje ni GPS.
+- Ninguna función, texto hablado, permiso ni regla de voz cambió.
 
 ## Sin verificar
 

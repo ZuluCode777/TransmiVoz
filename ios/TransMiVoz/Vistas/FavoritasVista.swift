@@ -28,6 +28,7 @@ struct FavoritasVista: View {
             .padding(16)
         }
         .bordeSuperiorNitido()
+        .pantallaWeb()
         .navigationTitle("Favoritas")
         .navigationBarTitleDisplayMode(.inline)
         .bordeInferiorLegible()
@@ -61,18 +62,12 @@ struct FavoritasVista: View {
             ForEach(modelo.codigos, id: \.self) { codigo in
                 VStack(alignment: .leading, spacing: 8) {
                     filaRuta(codigo)
-                    Button(role: .destructive) {
-                        quitar(codigo)
-                    } label: {
-                        Text(TextoFavoritas.quitar).foregroundStyle(Color(uiColor: .systemBackground))
-                    }
-                    .font(.body)
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.large)
-                    .tint(.rojoAccesible)
-                    .frame(minHeight: 44)
-                    .accessibilityLabel(TextoFavoritas.etiquetaQuitar(codigo))
-                    .accessibilityIdentifier("quitar-favorita-\(codigo)")
+                    // Estilo propio y a todo el ancho, como los botones de la web: el relleno del sistema dependía del
+                    // color de acento y su área táctil era solo la del texto (87 pt en la corrida en que un toque no quitó nada).
+                    Button(TextoFavoritas.quitar, role: .destructive) { quitar(codigo) }
+                        .buttonStyle(EstiloBotonPeligro())
+                        .accessibilityLabel(TextoFavoritas.etiquetaQuitar(codigo))
+                        .accessibilityIdentifier("quitar-favorita-\(codigo)")
                 }
             }
         }
@@ -92,7 +87,7 @@ struct FavoritasVista: View {
                 .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
                 .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(EstiloApreton())
             .accessibilityLabel(TextoFavoritas.ruta(codigo))
             .accessibilityHint(TextoRutas.pistaDetalle)
             .accessibilityIdentifier("favorita-\(codigo)")

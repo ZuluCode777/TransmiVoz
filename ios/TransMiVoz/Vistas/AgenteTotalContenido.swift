@@ -72,7 +72,7 @@ struct AgenteTotalContenido: View {
             VStack(spacing: 12) {
                 Group {
                     switch agente.fase {
-                    case .pensando: ProgressView().controlSize(.large)
+                    case .pensando: ProgressView().controlSize(.large).tint(Paleta.brandForeground)
                     case .escuchando: Image(systemName: "ear.fill").font(.largeTitle.weight(.bold))
                     case .reposo: Image(systemName: "mic.fill").font(.largeTitle.weight(.bold))
                     }
@@ -163,6 +163,8 @@ struct AgenteTotalContenido: View {
                 }
                 .fixedSize(horizontal: false, vertical: true)
                 .tarjetaWeb()
+                // Contenedor: sin esto el identificador de la tarjeta pisa el de cada hijo («agente-total-motor» dejaba de existir).
+                .accessibilityElement(children: .contain)
                 .accessibilityIdentifier("agente-total-pasos")
             }
             if esViaje {
@@ -182,9 +184,11 @@ struct AgenteTotalContenido: View {
                 TextoAgenteTotal.marcadorCampo,
                 text: Binding(get: { agente.consulta.texto }, set: { agente.consulta.editarTexto($0) }), axis: .vertical
             )
-            .lineLimit(1...5)
-            .textFieldStyle(.roundedBorder)
-            .frame(minHeight: 44)
+            // Letra `text-xl` y dos renglones como mínimo: el campo mismo, no un marco alrededor, mide más de 44 pt de alto
+            // (con un renglón de la letra del cuerpo medía 22 pt en la auditoría nativa).
+            .font(.jakarta(.regular, .xl))
+            .lineLimit(2...5)
+            .campoWeb()
             .focused($campoEnfocado)
             .submitLabel(.send)
             .onSubmit { enviar() }

@@ -25,6 +25,8 @@ final class EntornoApp {
     /// Modo de visualización (Baja visión o Ceguera total), guardado en este iPhone. En las pruebas de interfaz parte
     /// siempre de Baja visión y no deja nada guardado.
     let modo: ModoAppModelo
+    /// «Alto contraste» elegido por la persona; sin elección, la app sigue la apariencia del sistema.
+    let altoContraste: AltoContrasteModelo
     /// `true` solo en las pruebas de interfaz (compilación de depuración).
     let modoPruebas: Bool
 
@@ -42,7 +44,11 @@ final class EntornoApp {
         self.accesorio = accesorio
         self.monitorAudio = monitorAudio
         self.modoPruebas = modoPruebas
-        modo = ModoAppModelo(almacen: AlmacenModoUserDefaults(preferencias: Self.preferenciasDelModo(modoPruebas: modoPruebas)))
+        // El modo y el alto contraste comparten preferencias: en las pruebas de interfaz, la suite que se vacía en cada arranque.
+        let preferenciasDelModo = Self.preferenciasDelModo(modoPruebas: modoPruebas)
+        modo = ModoAppModelo(almacen: AlmacenModoUserDefaults(preferencias: preferenciasDelModo))
+        altoContraste = AltoContrasteModelo(almacen: AlmacenModoUserDefaults(
+            preferencias: preferenciasDelModo, clave: AlmacenModoUserDefaults.claveAltoContraste))
         #if DEBUG
         // En las pruebas de interfaz el planificador es el simulado, rotulado, sin red.
         let planificador: ClientePlanificador

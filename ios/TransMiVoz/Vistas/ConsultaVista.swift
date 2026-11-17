@@ -61,8 +61,7 @@ struct ConsultaVista: View {
                             // Por `editarTexto`: una edición de la persona deja de contar como «lo dictado».
                             TextField("Pregunta", text: Binding(get: { modelo.texto }, set: { modelo.editarTexto($0) }), axis: .vertical)
                                 .lineLimit(1...5)
-                                .textFieldStyle(.roundedBorder)
-                                .frame(minHeight: 44)
+                                .campoWeb()
                                 .focused($campoEnfocado)
                                 .submitLabel(.send)
                                 .onSubmit { enviar() }
@@ -97,6 +96,7 @@ struct ConsultaVista: View {
                 .scrollDismissesKeyboard(.interactively)
                 .bordeInferiorLegible()
             }
+            .pantallaWeb()
             .navigationTitle("Consulta")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -297,7 +297,7 @@ private struct ResultadoConsultaVista: View {
         case .inactiva:
             EmptyView()
         case .enviando:
-            ProgressView("Consultando al servidor…")
+            ProgresoWeb(texto: "Consultando al servidor…")
                 .accessibilityIdentifier("progreso-consulta")
         case .respuesta(let respuesta):
             RespuestaVista(

@@ -32,6 +32,7 @@ struct ViajeVista: View {
             .padding(16)
         }
         .bordeSuperiorNitido()
+        .pantallaWeb()
         .navigationTitle(TextoRutas.tituloViaje)
         .navigationBarTitleDisplayMode(.inline)
         .bordeInferiorLegible()
@@ -58,7 +59,7 @@ struct ViajeVista: View {
         case .inactivo:
             EmptyView()
         case .cargando:
-            ProgressView(TextoRutas.cargandoLugares).accessibilityIdentifier("progreso-lugares")
+            ProgresoWeb(texto: TextoRutas.cargandoLugares).accessibilityIdentifier("progreso-lugares")
         case .fallo(let error):
             ErrorRutasVista(error: error, foco: $foco, alReintentar: { modelo.cargarLugares() })
         case .listo(let lista):
@@ -89,8 +90,6 @@ struct ViajeVista: View {
         if case .listo = modelo.lugares {
             Button(TextoRutas.botonPlanear) { modelo.planear() }
                 .accion(prominente: true, disponible: modelo.puedePlanear)
-                .controlSize(.large)
-                .frame(minHeight: 44)
                 .accessibilityIdentifier("boton-planear-viaje")
             if modelo.origen == nil || modelo.destino == nil {
                 Text(TextoRutas.faltaElegir).font(.footnote).foregroundStyle(.textoSecundario)
@@ -103,7 +102,7 @@ struct ViajeVista: View {
         case .inactivo:
             EmptyView()
         case .cargando:
-            ProgressView(TextoRutas.planeando).accessibilityIdentifier("progreso-viaje")
+            ProgresoWeb(texto: TextoRutas.planeando).accessibilityIdentifier("progreso-viaje")
         case .fallo(let error):
             ErrorRutasVista(error: error, foco: $foco, alReintentar: { modelo.planear() })
         case .listo(let plan):
@@ -268,8 +267,7 @@ private struct SelectorLugarVista: View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 8) {
                 TextField(TextoRutas.etiquetaFiltro, text: $filtro)
-                    .textFieldStyle(.roundedBorder)
-                    .frame(minHeight: 44)
+                    .campoWeb()
                     .accessibilityLabel(TextoRutas.etiquetaFiltro)
                     .accessibilityIdentifier("filtro-lugares")
 
@@ -290,7 +288,7 @@ private struct SelectorLugarVista: View {
                         .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
                         .contentShape(Rectangle())
                     }
-                    .buttonStyle(.bordered)
+                    .buttonStyle(EstiloBotonSecundario())
                     .accessibilityAddTraits(lugar == elegido ? .isSelected : [])
                     .accessibilityIdentifier("lugar-\(lugar)")
                 }
@@ -299,6 +297,7 @@ private struct SelectorLugarVista: View {
         }
         .scrollDismissesKeyboard(.interactively)
         .bordeSuperiorNitido()
+        .pantallaWeb()
         .navigationTitle(TextoRutas.tituloSelector(rol))
         .navigationBarTitleDisplayMode(.inline)
         .bordeInferiorLegible()

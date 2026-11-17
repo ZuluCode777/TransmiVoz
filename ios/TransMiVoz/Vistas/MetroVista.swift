@@ -33,7 +33,7 @@ private struct MetroPantalla: View {
                     titulo: TextoMetro.titulo, subtitulo: "Línea 1 · en construcción · sin servicio", simbolo: "tram")
                 switch modelo.estado {
                 case .inactivo, .cargando:
-                    ProgressView(TextoMetro.cargando)
+                    ProgresoWeb(texto: TextoMetro.cargando)
                         .accessibilityIdentifier("metro-cargando")
                 case .fallo(let error):
                     errorView(error)
@@ -43,6 +43,7 @@ private struct MetroPantalla: View {
             }
             .padding(16)
         }
+        .pantallaWeb()
         .navigationTitle(TextoMetro.titulo)
         .navigationBarTitleDisplayMode(.inline)
         .bordeInferiorLegible()
@@ -71,9 +72,7 @@ private struct MetroPantalla: View {
                 .accessibilityFocused($foco, equals: .resultado)
             Text(TextoMetro.mensaje(de: error)).accessibilityIdentifier("metro-error")
             Button(TextoMetro.reintentar) { modelo.cargar() }
-                .buttonStyle(.bordered)
-                .controlSize(.large)
-                .frame(minHeight: 44)
+                .buttonStyle(EstiloBotonSecundario())
                 .accessibilityIdentifier("metro-reintentar")
         }
     }
@@ -93,9 +92,7 @@ private struct MetroPantalla: View {
             Button { modelo.repetirEstado() } label: {
                 Label(TextoMetro.repetirEstado, systemImage: "speaker.wave.2")
             }
-            .buttonStyle(.bordered)
-            .controlSize(.large)
-            .frame(minHeight: 44)
+            .buttonStyle(EstiloBotonSecundario())
             .accessibilityIdentifier("metro-repetir")
             if let aviso = modelo.avisoVoz {
                 Text(aviso).accessibilityIdentifier("metro-aviso-voz")
@@ -131,6 +128,7 @@ private struct MetroPantalla: View {
                 .accessibilityIdentifier("metro-atribucion")
             if let licencia = URL(string: r.mapa.licenciaUrl), licencia.scheme?.lowercased() == "https" {
                 Link("Licencia: \(r.mapa.licencia)", destination: licencia)
+                    .enlaceWeb()
                     .frame(minHeight: 44, alignment: .leading)
                     .accessibilityIdentifier("metro-licencia")
             }
@@ -149,6 +147,7 @@ private struct MetroPantalla: View {
                             Text("\(estacion.id) · \(estacion.nombreMostrado)").font(.headline)
                             Text(estacion.corredor).font(.subheadline).foregroundStyle(.textoSecundario)
                         }
+                        .foregroundStyle(Paleta.cardForeground)
                         .frame(minHeight: 44, alignment: .leading)
                         .accessibilityElement(children: .combine)
                         .accessibilityIdentifier("metro-estacion-\(estacion.id)")
@@ -173,9 +172,7 @@ private struct MetroPantalla: View {
             Button(resaltada ? TextoMetro.quitarResalte : TextoMetro.verEnElMapa) {
                 modelo.resaltar(resaltada ? nil : estacion.id)
             }
-            .buttonStyle(.bordered)
-            .controlSize(.large)
-            .frame(minHeight: 44)
+            .buttonStyle(EstiloBotonSecundario())
             .accessibilityIdentifier("metro-resaltar-\(estacion.id)")
         }
         .padding(.top, 8)
@@ -189,6 +186,7 @@ private struct MetroPantalla: View {
             } label: {
                 Text(r.linea2.titulo)
                     .font(.headline)
+                    .foregroundStyle(Paleta.cardForeground)
                     .frame(minHeight: 44, alignment: .leading)
                     .accessibilityIdentifier("metro-linea-2")
             }
@@ -203,7 +201,7 @@ private struct MetroPantalla: View {
             ForEach(r.fuentes) { fuente in
                 if let enlace = fuente.enlace {
                     Link(destination: enlace) {
-                        Text(fuente.texto).frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                        Text(fuente.texto).enlaceWeb().frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
                     }
                     .accessibilityIdentifier("metro-fuente-\(fuente.id)")
                 } else {

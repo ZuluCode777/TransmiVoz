@@ -42,6 +42,7 @@ struct EmergenciaVista: View {
             }
             .padding(16)
         }
+        .pantallaWeb()
         .navigationTitle(TextoEmergencia.titulo)
         .navigationBarTitleDisplayMode(.inline)
         .bordeInferiorLegible()

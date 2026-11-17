@@ -30,6 +30,7 @@ struct LupaVista: View {
             }
             .padding(16)
         }
+        .pantallaWeb()
         .navigationTitle("Lupa")
         .navigationBarTitleDisplayMode(.inline)
         .bordeInferiorLegible()
@@ -180,6 +181,7 @@ struct LupaVista: View {
                     value: Binding(get: { modelo.aumento }, set: { modelo.fijarAumento($0) }),
                     in: modelo.aumentoPiso...modelo.aumentoMaximo,
                     step: LupaModelo.pasoAumento)
+                    .tint(Paleta.foreground)
                     .frame(minHeight: 44)
                     .accessibilityLabel("Aumento")
                     .accessibilityValue(TextoLupa.aumento(modelo.aumento))
@@ -246,6 +248,7 @@ private struct HojaPermisoCamara: View {
                 }
                 .padding(16)
             }
+            .pantallaWeb()
             .navigationTitle(TextoLupa.tituloPermiso)
             .navigationBarTitleDisplayMode(.inline)
         }
@@ -253,11 +256,9 @@ private struct HojaPermisoCamara: View {
 }
 
 private extension View {
-    /// Botón de la lupa: del estilo de la casa (`accion`), grande y de al menos 44 pt de alto.
+    /// Botón de la lupa: del estilo de la casa (`accion`), a todo el ancho y de al menos 56 pt de alto.
     func botonDeLupa(prominente: Bool) -> some View {
         accion(prominente: prominente, disponible: true)
-            .controlSize(.large)
-            .frame(minHeight: 44)
     }
 }
 

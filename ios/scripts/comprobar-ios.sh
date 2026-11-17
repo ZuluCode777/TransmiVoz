@@ -45,8 +45,9 @@ ESQUEMA="TransMiVoz"
 SALIDA="${SALIDA:-$RAIZ/ios/salida/$(date -u +%Y%m%dT%H%M%SZ)-$$}"
 # Clases de pruebas de interfaz dedicadas al texto MUY grande: TODAS sus pruebas lanzan la app con
 # `UICTContentSizeCategoryAccessibilityXXXL` (comprobado una por una en `ios/TransMiVozUITests/`). Su diseño con ese
-# tamaño lo repara el pase de rediseño; mientras tanto la CI no las ejecuta (el Accesorio, además, tarda unos 40 min de
-# los 90 que permite el job). Nada de tamaño normal está aquí: las auditorías de accesibilidad, contraste y área táctil a
+# tamaño SIGUE PENDIENTE por decisión del dueño (16/11/2026): el pase visual de tamaño estándar no lo reparó y no hay
+# fecha para hacerlo; por eso la CI no las ejecuta (el Accesorio, además, tarda unos 40 min de los 90 que permite el
+# job). Dynamic Type sigue activo en toda la app. Nada de tamaño normal está aquí: las auditorías de accesibilidad, contraste y área táctil a
 # tamaño estándar y la prueba de quitar favoritas se ejecutan siempre. Una clase mixta (p. ej. `TransMiVozDictadoUITests`,
 # que tiene una prueba a texto muy grande entre seis estándar) NO se omite entera. Si añades una clase dedicada, agrégala
 # aquí; `ios/scripts/probar-comprobar-ios.sh` comprueba que cada nombre exista y termine en `TextoGrandeUITests`.

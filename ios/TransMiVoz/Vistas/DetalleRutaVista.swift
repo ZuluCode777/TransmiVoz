@@ -30,7 +30,7 @@ struct DetalleRutaVista: View {
                 case .inactivo:
                     EmptyView()
                 case .cargando:
-                    ProgressView(TextoRutas.cargandoDetalle)
+                    ProgresoWeb(texto: TextoRutas.cargandoDetalle)
                         .accessibilityIdentifier("progreso-detalle-ruta")
                 case .fallo(let error):
                     ErrorRutasVista(error: error, foco: $foco, alReintentar: { modelo.cargar() })
@@ -41,6 +41,7 @@ struct DetalleRutaVista: View {
             .padding(16)
         }
         .bordeSuperiorNitido()
+        .pantallaWeb()
         .navigationTitle(TextoRutas.tituloDetalle(modelo.codigo))
         .navigationBarTitleDisplayMode(.inline)
         .bordeInferiorLegible()
@@ -180,8 +181,7 @@ private struct BotonFavorita: View {
             Label(guardada ? TextoRutas.quitar : TextoRutas.guardar, systemImage: guardada ? "heart.fill" : "heart")
                 .frame(minHeight: 44)
         }
-        .buttonStyle(.bordered)
-        .controlSize(.large)
+        .buttonStyle(EstiloBotonSecundario())
         .accessibilityLabel(guardada ? TextoRutas.etiquetaQuitar(codigo) : TextoRutas.etiquetaGuardar(codigo))
         .accessibilityIdentifier("boton-favorita")
     }
@@ -203,9 +203,7 @@ struct CatalogoVista: View {
                 Text(TextoRutas.catalogoAntiguo).accessibilityIdentifier("aviso-catalogo-antiguo")
                 Text(TextoRutas.catalogoAntiguoAyuda)
                 Button(TextoRutas.volverAConsultar) { alVolverAConsultar() }
-                    .buttonStyle(.bordered)
-                    .controlSize(.large)
-                    .frame(minHeight: 44)
+                    .buttonStyle(EstiloBotonSecundario())
                     .accessibilityIdentifier("boton-volver-a-consultar-rutas")
             }
         }
@@ -228,9 +226,7 @@ struct ErrorRutasVista: View {
             Text(error.recuperacion).foregroundStyle(.textoSecundario)
             if error.admiteReintento {
                 Button("Reintentar") { alReintentar() }
-                    .buttonStyle(.bordered)
-                    .controlSize(.large)
-                    .frame(minHeight: 44)
+                    .buttonStyle(EstiloBotonSecundario())
                     .accessibilityIdentifier("boton-reintentar-rutas")
             }
         }
