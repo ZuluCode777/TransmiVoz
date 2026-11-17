@@ -145,6 +145,31 @@ final class CentroAvisosTests: XCTestCase {
         XCTAssertEqual(b.centro.avisos.count, 1)
     }
 
+    func testEmitirSinVozListaOMarcaVigenteSinHablarNiGastarCupoNiDuplicar() {
+        let b = BancoCentro()
+        b.centro.emitir(.proximidad, "Presencia detectada.")
+        b.centro.retirar(fuente: .sesion)
+        XCTAssertEqual(b.vigentes(), [])
+        let voces = b.salida.dicho.count
+
+        // El mismo aviso vuelve tras un hueco: vuelve a constar vigente, sin voz y sin duplicar la fila.
+        XCTAssertEqual(b.centro.emitir(.proximidad, "Presencia detectada.", conVoz: false), .listado)
+        XCTAssertEqual(b.vigentes(), [.proximidad])
+        XCTAssertEqual(b.centro.avisos.count, 1)
+        XCTAssertEqual(b.salida.dicho.count, voces, "no habló")
+        XCTAssertEqual(b.centro.avisos[0].textoVoz, "Presencia detectada.", "«Repetir» sigue teniendo qué decir")
+
+        // Ya vigente: no se duplica ni toca lo pendiente de voz.
+        XCTAssertEqual(b.centro.emitir(.proximidad, "Presencia detectada.", conVoz: false), .duplicado)
+        XCTAssertEqual(b.centro.avisos.count, 1)
+
+        // No gasta cupo del límite de ritmo: tras 5 voces reales y muchas listadas sin voz, la sexta real aún se dice.
+        let c = BancoCentro()
+        for i in 1...5 { c.centro.emitir(.proximidad, "Objeto \(i)."); c.salida.terminarSola() }
+        for _ in 1...20 { c.centro.retirar(fuente: .sesion); c.centro.emitir(.proximidad, "Objeto 5.", conVoz: false) }
+        XCTAssertEqual(c.centro.emitir(.proximidad, "Objeto 6."), .hablado)
+    }
+
     func testUnTextoDistintoDeLaMismaClaseReemplazaAlAnteriorYSeDice() {
         let b = BancoCentro()
         b.centro.emitir(.proximidad, "Objeto a 1 metro.")
@@ -594,8 +619,13 @@ final class AvisosSesionTests: XCTestCase {
         banco.modelo.evaluar()
         XCTAssertEqual(banco.modelo.estado, .sinDatos(.sinRecepcion))
         let centro = banco.modelo.centro
-        let vigentes = centro.avisos.filter { centro.vigente($0) }.map(\.tipo)
-        XCTAssertEqual(vigentes, [.datoVencido], "la proximidad cerró y queda el dato vencido")
+        var vigentes = centro.avisos.filter { centro.vigente($0) }.map(\.tipo)
+        XCTAssertEqual(vigentes, [], "la proximidad cerró y, dentro de la gracia de la voz, el dato vencido aún no se abre (#41)")
+
+        banco.reloj.fijar(escenario.entregas[0].instante + 501 + SesionAccesorioModelo.graciaSinDatosMs)
+        banco.modelo.evaluar()
+        vigentes = centro.avisos.filter { centro.vigente($0) }.map(\.tipo)
+        XCTAssertEqual(vigentes, [.datoVencido], "cumplida la gracia queda el dato vencido")
     }
 
     func testPerderElAccesorioHablandoCortaLaMedidaYDiceElAvisoUrgente() throws {

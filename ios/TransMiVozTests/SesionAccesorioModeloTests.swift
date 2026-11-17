@@ -272,8 +272,13 @@ final class SesionAccesorioModeloTests: XCTestCase {
         banco.entregar(escenario.entregas[0])
         banco.reloj.fijar(escenario.entregas[0].instante + 501)
         banco.modelo.evaluar()
-        XCTAssertEqual(banco.modelo.estado, .sinDatos(.sinRecepcion))
+        XCTAssertEqual(banco.modelo.estado, .sinDatos(.sinRecepcion), "el estado crudo vence a los 500 ms, sin gracia")
+        XCTAssertEqual(banco.salida.dicho.last, "Objeto a 1 metro, a la izquierda.", "un hueco ordinario no se dice todavía (#41)")
+        // Sin tramas de forma continua, pasada la gracia de la voz, se avisa una vez y no se repite la última medida.
+        banco.reloj.fijar(escenario.entregas[0].instante + 501 + SesionAccesorioModelo.graciaSinDatosMs)
+        banco.modelo.evaluar()
         XCTAssertEqual(banco.salida.dicho.last, "Sin datos del sensor.")
+        XCTAssertEqual(banco.salida.dicho.filter { $0.hasPrefix("Objeto") }.count, 1)
     }
 
     func testUnPasoSinRespuestaFallaPorTiempo() {

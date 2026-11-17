@@ -99,6 +99,8 @@ enum ResultadoEmision: Equatable {
     case silenciado(MotivoSilencio)
     /// Igual al aviso vigente de su fuente: ni se repite ni se vuelve a listar.
     case duplicado
+    /// Se listó sin voz porque quien emite lo pidió (`conVoz: false`): ya lo dijo antes.
+    case listado
     /// Demasiados avisos de esa clase en poco tiempo: no se dijo ahora. Consta en la lista y quien lo emite puede reintentar.
     case limitado
 }
