@@ -163,6 +163,9 @@ uint32_t g_lecturas = 0;
 std::atomic<uint32_t> g_vinculos_rechazados{0};  // los incrementa el callback del almacén
 uint32_t g_ultimo_estado_ms = 0;
 uint32_t g_ultimo_anuncio_ms = 0;
+// Diagnóstico de presencia por el puerto serie: solo lo toca loop().
+uint32_t g_presencia_validas_vistas = 0;  // tramas_validas ya reflejadas en una línea
+int g_presencia_salud_avisada = -1;       // salud != 0 ya impresa; -1 si no hay falla pendiente de avisar
 
 // --- Utilidades -----------------------------------------------------------------
 
@@ -719,10 +722,52 @@ void imprimir_estado(uint32_t ahora) {
   }
 }
 
+// Terminal de presencia real: una línea por cada trama válida NUEVA del SEN0395
+// (cuenta de Interprete, la misma que ve el BLE). valor=1 presencia, valor=0 nadie
+// en la ventana; solo con salud 0. Sin trama nueva no se repite nada (así un 0 o un
+// 1 viejo no se presenta como una lectura nueva); si no hay observación vigente (iniciando, sin
+// datos 2500 ms, trama inválida, falla del radar) imprime valor=desconocido con su
+// salud, una vez por cambio de salud, nunca 0. Solo lee el intérprete bajo el
+// cerrojo y no consume la UART: la lectura sigue siendo de atender_uart().
+// Sin pines (y en simulación) no imprime nada: no hay radar real que informar.
+void diagnosticar_presencia() {
+  // El diagnóstico se descarta si no cabe: nunca debe frenar la lectura de la UART.
+  if (!kRadarHabilitado || Serial.availableForWrite() < 112) return;
+  uint32_t ahora;
+  uint32_t validas;
+  uint8_t fase;
+  ble::EntradaRadar e;
+  {
+    Cerrojo c;
+    ahora = millis();
+    validas = g_radar.contadores().tramas_validas;
+    fase = static_cast<uint8_t>(g_radar.fase());
+    e = g_radar.entrada(ahora);
+  }
+  const bool nueva = validas != g_presencia_validas_vistas;
+  g_presencia_validas_vistas = validas;
+  if (e.estado == ble::EstadoRadar::Fallo) {
+    if (g_presencia_salud_avisada == e.salud) return;
+    g_presencia_salud_avisada = e.salud;
+    Serial.printf("presencia t=%lu valor=desconocido salud=%u fase=%u validas=%lu\n", static_cast<unsigned long>(ahora),
+                  static_cast<unsigned>(e.salud), static_cast<unsigned>(fase), static_cast<unsigned long>(validas));
+    return;
+  }
+  g_presencia_salud_avisada = -1;
+  if (!nueva || e.edad_ms > ble::kCaducidadMs) return;
+  Serial.printf("presencia t=%lu valor=%d edad_ms=%u validas=%lu\n", static_cast<unsigned long>(ahora),
+                e.estado == ble::EstadoRadar::Presencia ? 1 : 0, static_cast<unsigned>(e.edad_ms),
+                static_cast<unsigned long>(validas));
+}
+
 }  // namespace
 
 void setup() {
   Serial.begin(115200);
+#if ARDUINO_USB_CDC_ON_BOOT
+  // Sin lector USB, se pierden registros antes que bloquear el radar o los avisos BLE.
+  Serial.setTxTimeoutMs(0);
+#endif
   g_cerrojo = xSemaphoreCreateRecursiveMutex();
   Serial.printf("Accesorio Visionaria, firmware %u.%u.%u, contrato %u.%u, modo %s\n", enlace::kFirmwareMayor,
                 enlace::kFirmwareMenor, enlace::kFirmwareRevision, ble::kVersionMayor, ble::kVersionMenor,
@@ -753,6 +798,7 @@ void loop() {
     Cerrojo c;
     atender_radar();
   }
+  diagnosticar_presencia();
   if (g_ble_activo) ciclo_ble();
   Cerrojo c;
   imprimir_estado(millis());

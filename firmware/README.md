@@ -63,6 +63,31 @@ Sin configuración local compila, pero **no habilita nada**: sin pines no abre l
 
 Compilación de simulación (presencia sintética, bit 5, nombre `Visionaria-SIM`, sin radar): `-DVISIONARIA_SIMULACION=1` más botón y clave. Otras banderas, límites de seguridad y guion de banco: [ea-12-ble.md](../docs/expoandes/ea-12-ble.md).
 
+## Terminal de presencia (USB)
+
+Con la compilación de radar real, el monitor serie intenta imprimir una línea por **cada trama válida nueva** del SEN0395 (≈1 por segundo; es el mismo contador `tramas_validas` y la misma `EntradaRadar` que ve el BLE). Si el USB está lleno o no hay lector, se descartan registros para no frenar el radar ni los avisos BLE. El iPhone sigue siendo el cliente BLE: esto solo lee el estado del intérprete y no toca la UART del radar, el BLE, los vínculos ni la configuración del radar.
+
+En Linux, cambia `/dev/ttyACM0` si la placa aparece en otro puerto:
+
+```bash
+stty -F /dev/ttyACM0 115200 raw -echo -hupcl clocal cread
+cat /dev/ttyACM0 | rg --line-buffered '^presencia '
+```
+
+Salida de ejemplo:
+
+```text
+presencia t=48213 valor=1 edad_ms=2 validas=37          # presencia en la ventana (0 a 300 mm)
+presencia t=49214 valor=0 edad_ms=1 validas=38          # radar sano, nadie en la ventana
+presencia t=61800 valor=desconocido salud=2 fase=2 validas=38   # sin observación vigente
+```
+
+- `valor=1` es presencia y `valor=0` es «nadie detectado»; ambos solo con salud 0 y con una trama **nueva**, de edad máxima 500 ms. Sin trama nueva no se repite ningún valor: la última línea queda como registro histórico, no como una medida actual; consulta su `t` y `edad_ms`.
+- `valor=desconocido` (con `salud=` 1 iniciando, 2 sin datos 2500 ms, 3 trama inválida, 4 falla del radar, 6 configuración inválida) sale una vez por cambio de salud. **Nunca** se imprime como 0.
+- Sin pines del radar y en simulación no imprime nada de esto.
+- Un solo programa puede leer el puerto serie a la vez: cierra el monitor del IDE o cualquier otro antes de abrir este. `Ctrl+C` cierra la captura. El lector USB no ocupa la conexión BLE del iPhone. El comando anterior se comprobó en la placa de la feria; no se observó un reinicio al abrirlo.
+- Las líneas `estado` y `uart` cada 5 s siguen igual.
+
 ## Uso del codificador
 
 ```cpp
