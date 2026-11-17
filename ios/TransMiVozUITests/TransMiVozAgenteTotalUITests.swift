@@ -42,19 +42,56 @@ class AgenteTotalUITestCase: XCTestCase {
         XCTAssertEqual(XCTWaiter().wait(for: [espera], timeout: 10), .completed, mensaje, file: file, line: line)
     }
 
-    /// Lleva el elemento a la vista, entero y tocable, deslizando la pantalla.
+    /// Zona realmente visible del área desplazable: bajo la barra de navegación y la fila fija de la cabecera (el borde
+    /// superior del área desplazable) y sobre la barra de pestañas. Es la misma que mide `RecorridoAuditado`.
+    private var vistaVisible: VistaAuditada {
+        let contenido = app.scrollViews.firstMatch.frame
+        return VistaAuditada(
+            arriba: max(app.navigationBars.firstMatch.frame.maxY, contenido.minY),
+            abajo: min(app.tabBars.firstMatch.frame.minY, contenido.maxY))
+    }
+
+    /// Arrastra el contenido `desplazamiento` puntos (positivo = hacia delante), lejos del indicador del borde derecho.
+    private func arrastrar(_ desplazamiento: CGFloat) {
+        let vista = vistaVisible
+        let ventana = app.windows.firstMatch.frame
+        let inicio = app.windows.firstMatch.coordinate(withNormalizedOffset: .zero)
+            .withOffset(CGVector(dx: ventana.width / 2, dy: desplazamiento > 0 ? vista.abajo - 20 : vista.arriba + 20))
+        // Mantener el dedo quieto antes de soltar evita añadir inercia al arrastre.
+        inicio.press(
+            forDuration: 0.1, thenDragTo: inicio.withOffset(CGVector(dx: 0, dy: -desplazamiento)),
+            withVelocity: .default, thenHoldForDuration: 0.5)
+    }
+
+    /// Lleva el elemento a la vista, ENTERO y tocable, centrado entre la cabecera y la barra de pestañas. `isHittable` no
+    /// basta: el sistema lo da por cierto con solo una parte del elemento a la vista, y un toque en otro punto de su marco
+    /// (como el de `escribir`) cae entonces sobre la cabecera. Un elemento más alto que la vista no puede quedar entero: a ese
+    /// se le pide solo ser tocable. Cada gesto sale de la posición real del marco, no de un número fijo de deslizamientos.
     func traer(_ id: String, file: StaticString = #filePath, line: UInt = #line) {
         let objetivo = elemento(id)
         XCTAssertTrue(objetivo.waitForExistence(timeout: 10), "«\(id)» no existe", file: file, line: line)
-        for _ in 0..<8 where !objetivo.isHittable { app.scrollViews.firstMatch.swipeUp() }
-        for _ in 0..<8 where !objetivo.isHittable { app.scrollViews.firstMatch.swipeDown() }
-        XCTAssertTrue(objetivo.isHittable, "«\(id)» no es tocable tras deslizar", file: file, line: line)
+        func entero() -> Bool {
+            switch vistaVisible.encaje(de: [objetivo.frame]) {
+            case .yaEncaja, .noCabe: return objetivo.isHittable
+            case .desplazar, .marcoInvalido: return false
+            }
+        }
+        for _ in 0..<6 where !entero() {
+            let vista = vistaVisible
+            guard case .desplazar(let desplazamiento) = vista.encaje(de: [objetivo.frame]) else { break }
+            let paso = vista.abajo - vista.arriba - 40
+            arrastrar(max(-paso, min(paso, desplazamiento)))
+        }
+        XCTAssertTrue(
+            entero(), "«\(id)» no queda entero y tocable entre las barras: marco \(objetivo.frame), visible \(vistaVisible.arriba)…\(vistaVisible.abajo)",
+            file: file, line: line)
     }
 
     /// Escribe en el campo del asistente y espera a que muestre el texto completo.
     func escribir(_ texto: String, file: StaticString = #filePath, line: UInt = #line) {
         traer("agente-total-campo", file: file, line: line)
         let campo = elemento("agente-total-campo")
+        // El campo está entero a la vista: el punto del toque cae dentro de él y no bajo la cabecera.
         campo.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.2)).tap()
         XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 10), "El teclado no apareció", file: file, line: line)
         campo.typeText(texto)
