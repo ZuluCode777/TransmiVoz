@@ -49,8 +49,7 @@ struct RutasVista: View {
                 Text(TextoRutas.sinUbicacion).font(.footnote).foregroundStyle(.textoSecundario)
 
                 TextField(TextoRutas.etiquetaCampo, text: $modelo.texto)
-                    .textFieldStyle(.roundedBorder)
-                    .frame(minHeight: 44)
+                    .campoWeb()
                     .focused($campoEnfocado)
                     .submitLabel(.search)
                     .onSubmit { buscar() }
@@ -83,6 +82,7 @@ struct RutasVista: View {
         }
         .scrollDismissesKeyboard(.interactively)
         .bordeSuperiorNitido()
+        .pantallaWeb()
         .navigationTitle(TextoRutas.titulo)
         .navigationBarTitleDisplayMode(.inline)
         .bordeInferiorLegible()
@@ -108,7 +108,7 @@ struct RutasVista: View {
         case .inactivo:
             EmptyView()
         case .cargando:
-            ProgressView(TextoRutas.consultando).accessibilityIdentifier("progreso-busqueda-rutas")
+            ProgresoWeb(texto: TextoRutas.consultando).accessibilityIdentifier("progreso-busqueda-rutas")
         case .fallo(let error):
             ErrorRutasVista(error: error, foco: $foco, alReintentar: { campoEnfocado = false; modelo.reintentar() })
         case .listo(let encontradas):
@@ -140,11 +140,10 @@ struct RutasVista: View {
                     Text(TextoRutas.trayecto(ruta.desde, ruta.hacia))
                 }
                 .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-                .padding(12)
-                .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Color.textoSecundario, lineWidth: 1))
-                .contentShape(Rectangle())
+                .tarjetaWeb()
+                .contentShape(RoundedRectangle(cornerRadius: Tema.radio2XL))
             }
-            .buttonStyle(.plain)
+            .buttonStyle(EstiloApreton())
             .accessibilityElement(children: .combine)
             .accessibilityLabel(TextoRutas.etiquetaRuta(ruta))
             .accessibilityHint("Abre el detalle y el mapa de la ruta.")

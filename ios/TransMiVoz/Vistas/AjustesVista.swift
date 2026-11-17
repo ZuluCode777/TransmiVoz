@@ -29,7 +29,7 @@ struct AjustesVista: View {
                 }
                 .navigationDestination(item: $seccion) { seccion in
                     switch seccion {
-                    case .preferencias: PreferenciasVista(accesorio: entorno.accesorio)
+                    case .preferencias: PreferenciasVista(accesorio: entorno.accesorio, altoContraste: entorno.altoContraste)
                     case .favoritas: FavoritasVista(modelo: entorno.favoritas)
                     case .diagnostico: DiagnosticoVista(ajustes: entorno.ajustes, voz: entorno.avisos.voz, modoPruebas: entorno.modoPruebas)
                     case .ayuda: AyudaVista()

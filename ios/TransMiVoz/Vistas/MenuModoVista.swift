@@ -10,24 +10,31 @@ struct MenuModoVista: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(spacing: 12) {
-                    ForEach(ModoApp.allCases) { opcion in
-                        OpcionModo(modo: opcion, activo: opcion == modo) { alElegir(opcion) }
-                    }
+            VStack(spacing: 0) {
+                // «Cerrar menú» va en una fila fija del contenido y no en la barra: allí iOS 26 lo deja en 36 pt de alto y
+                // su texto no escala con Dynamic Type (auditoría nativa).
+                Button(action: alCerrar) {
+                    Label(TextoInicio.cerrarMenuModo, systemImage: "xmark")
                 }
-                .padding(16)
+                .buttonStyle(EstiloBotonPildora())
+                .accessibilityIdentifier("boton-cerrar-menu-modo")
+                .frame(maxWidth: .infinity, alignment: .trailing)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
+
+                ScrollView {
+                    VStack(spacing: 12) {
+                        ForEach(ModoApp.allCases) { opcion in
+                            OpcionModo(modo: opcion, activo: opcion == modo) { alElegir(opcion) }
+                        }
+                    }
+                    .padding(16)
+                }
             }
+            .pantallaWeb()
             .navigationTitle(TextoInicio.tituloMenuModo)
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button(TextoInicio.cerrarMenuModo, action: alCerrar)
-                        .accessibilityIdentifier("boton-cerrar-menu-modo")
-                }
-            }
         }
-        .tint(Paleta.foreground)
     }
 }
 

@@ -83,6 +83,74 @@ final class ModoAppModeloTests: XCTestCase {
     }
 }
 
+/// «Alto contraste» (el interruptor de colores fluorescentes de la web): sin elección manda el sistema; la elección se guarda
+/// con la clave y los valores de la web y sobrevive a otra instancia.
+@MainActor
+final class AltoContrasteModeloTests: XCTestCase {
+    func testSinNadaGuardadoNoHayEleccionYMandaElSistema() {
+        let almacen = AlmacenModoFalso()
+        XCTAssertNil(AltoContrasteModelo(almacen: almacen).elegido)
+        XCTAssertEqual(almacen.escrituras, 0, "leer la preferencia no escribe nada")
+    }
+
+    func testLeeLaEleccionGuardadaConLosValoresDeLaWeb() {
+        XCTAssertEqual(AltoContrasteModelo(almacen: AlmacenModoFalso(guardado: "on")).elegido, true)
+        XCTAssertEqual(AltoContrasteModelo(almacen: AlmacenModoFalso(guardado: "off")).elegido, false)
+    }
+
+    /// Un valor guardado que no es `on` ni `off` se ignora: sigue mandando el sistema.
+    func testUnValorDesconocidoSeIgnora() {
+        for valor in ["", "true", "ON", "oscuro"] {
+            XCTAssertNil(AltoContrasteModelo(almacen: AlmacenModoFalso(guardado: valor)).elegido, "«\(valor)»")
+        }
+    }
+
+    func testElegirGuardaYApagarloTambienEsUnaEleccion() {
+        let almacen = AlmacenModoFalso()
+        let modelo = AltoContrasteModelo(almacen: almacen)
+        XCTAssertTrue(modelo.elegir(true))
+        XCTAssertEqual(modelo.elegido, true)
+        XCTAssertEqual(almacen.guardado, "on")
+        XCTAssertTrue(modelo.elegir(false))
+        XCTAssertEqual(modelo.elegido, false, "apagado a mano no vuelve a seguir al sistema")
+        XCTAssertEqual(almacen.guardado, "off")
+        XCTAssertEqual(almacen.escrituras, 2)
+    }
+
+    func testElegirLoYaElegidoNoEscribe() {
+        let almacen = AlmacenModoFalso(guardado: "on")
+        let modelo = AltoContrasteModelo(almacen: almacen)
+        XCTAssertFalse(modelo.elegir(true))
+        XCTAssertEqual(almacen.escrituras, 0)
+    }
+
+    func testLaEleccionSobreviveAUnaNuevaInstancia() {
+        let almacen = AlmacenModoFalso()
+        AltoContrasteModelo(almacen: almacen).elegir(false)
+        XCTAssertEqual(AltoContrasteModelo(almacen: almacen).elegido, false)
+    }
+
+    /// Clave propia, la de la web (`transmivoz-fluor`), sin pisar la del modo aunque compartan preferencias.
+    func testLaClaveEsLaDeLaWebYNoPisaLaDelModo() throws {
+        XCTAssertEqual(AlmacenModoUserDefaults.claveAltoContraste, "transmivoz-fluor")
+        let nombre = "pruebas.contraste.\(UUID().uuidString)"
+        let preferencias = try XCTUnwrap(UserDefaults(suiteName: nombre))
+        defer { preferencias.removePersistentDomain(forName: nombre) }
+        let modo = ModoAppModelo(almacen: AlmacenModoUserDefaults(preferencias: preferencias))
+        let contraste = AltoContrasteModelo(almacen: AlmacenModoUserDefaults(
+            preferencias: preferencias, clave: AlmacenModoUserDefaults.claveAltoContraste))
+        modo.elegir(.total)
+        contraste.elegir(true)
+        XCTAssertEqual(preferencias.string(forKey: "transmivoz-mode"), "total")
+        XCTAssertEqual(preferencias.string(forKey: "transmivoz-fluor"), "on")
+    }
+
+    func testElAnuncioEsElDeLaWeb() {
+        XCTAssertEqual(AltoContrasteModelo.anuncio(true), "Colores fluorescentes activados.")
+        XCTAssertEqual(AltoContrasteModelo.anuncio(false), "Colores fluorescentes desactivados.")
+    }
+}
+
 final class TextoInicioTests: XCTestCase {
     /// Las seis baldosas de `components/partial-home.tsx`, en su orden: Emergencia siempre al final.
     func testLasSeisOpcionesTienenElOrdenYLosTextosDeLaWeb() {

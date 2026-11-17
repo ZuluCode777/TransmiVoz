@@ -33,6 +33,7 @@ struct DiagnosticoVista: View {
             }
             .padding(16)
         }
+        .pantallaWeb()
         .navigationTitle(DiagnosticoTexto.titulo)
         .navigationBarTitleDisplayMode(.inline)
         .bordeInferiorLegible()

@@ -47,6 +47,10 @@ struct RaizVista: View {
         .sheet(isPresented: $menuModoAbierto) {
             MenuModoVista(modo: entorno.modo.modo, alElegir: elegirModo, alCerrar: { menuModoAbierto = false })
         }
+        // Íconos, enlaces e interruptores toman la tinta de la paleta y no el color de acento del sistema.
+        .tint(Paleta.foreground)
+        // «Alto contraste»: sin elección propia (`nil`) manda la apariencia del sistema; con ella, la paleta que eligió la persona.
+        .preferredColorScheme(entorno.altoContraste.elegido.map { $0 ? .dark : .light })
         // Solo en primer plano y activa: inactiva (bloqueo, centro de control) o en segundo plano se suspende.
         .onChange(of: faseEscena) { _, nueva in
             entorno.accesorio?.escenaActiva(nueva == .active)

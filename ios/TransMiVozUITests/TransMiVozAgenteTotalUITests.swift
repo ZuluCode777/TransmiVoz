@@ -4,7 +4,8 @@ import XCTest
 // rotulados (`-PRUEBAS_UI_SIMULADAS`, `-PRUEBAS_UI_DICTADO_SINTETICO`): sin red, micrófono, audio ni VoiceOver real.
 //
 // Los ayudantes de `TransMiVozUITests.swift` son `private` a ese archivo y no se pueden reutilizar desde aquí: este archivo
-// trae los suyos, con la misma auditoría completa (todos los grupos, sin filtros ni exclusiones).
+// trae los suyos, con la misma auditoría completa (todos los grupos, sin filtros ni exclusiones). `RecorridoAuditado` y
+// `auditarPantallaLarga` sí se comparten: los usan también las pantallas largas de Metro, Mapa y GPS y la búsqueda de rutas.
 
 /// Base: lanza la app, cambia a Ceguera total por el menú de modo (como `testElMenuDeModoCambiaElInicioYSeCierra`) y espera el
 /// asistente de voz.
@@ -41,19 +42,56 @@ class AgenteTotalUITestCase: XCTestCase {
         XCTAssertEqual(XCTWaiter().wait(for: [espera], timeout: 10), .completed, mensaje, file: file, line: line)
     }
 
-    /// Lleva el elemento a la vista, entero y tocable, deslizando la pantalla.
+    /// Zona realmente visible del área desplazable: bajo la barra de navegación y la fila fija de la cabecera (el borde
+    /// superior del área desplazable) y sobre la barra de pestañas. Es la misma que mide `RecorridoAuditado`.
+    private var vistaVisible: VistaAuditada {
+        let contenido = app.scrollViews.firstMatch.frame
+        return VistaAuditada(
+            arriba: max(app.navigationBars.firstMatch.frame.maxY, contenido.minY),
+            abajo: min(app.tabBars.firstMatch.frame.minY, contenido.maxY))
+    }
+
+    /// Arrastra el contenido `desplazamiento` puntos (positivo = hacia delante), lejos del indicador del borde derecho.
+    private func arrastrar(_ desplazamiento: CGFloat) {
+        let vista = vistaVisible
+        let ventana = app.windows.firstMatch.frame
+        let inicio = app.windows.firstMatch.coordinate(withNormalizedOffset: .zero)
+            .withOffset(CGVector(dx: ventana.width / 2, dy: desplazamiento > 0 ? vista.abajo - 20 : vista.arriba + 20))
+        // Mantener el dedo quieto antes de soltar evita añadir inercia al arrastre.
+        inicio.press(
+            forDuration: 0.1, thenDragTo: inicio.withOffset(CGVector(dx: 0, dy: -desplazamiento)),
+            withVelocity: .default, thenHoldForDuration: 0.5)
+    }
+
+    /// Lleva el elemento a la vista, ENTERO y tocable, centrado entre la cabecera y la barra de pestañas. `isHittable` no
+    /// basta: el sistema lo da por cierto con solo una parte del elemento a la vista, y un toque en otro punto de su marco
+    /// (como el de `escribir`) cae entonces sobre la cabecera. Un elemento más alto que la vista no puede quedar entero: a ese
+    /// se le pide solo ser tocable. Cada gesto sale de la posición real del marco, no de un número fijo de deslizamientos.
     func traer(_ id: String, file: StaticString = #filePath, line: UInt = #line) {
         let objetivo = elemento(id)
         XCTAssertTrue(objetivo.waitForExistence(timeout: 10), "«\(id)» no existe", file: file, line: line)
-        for _ in 0..<8 where !objetivo.isHittable { app.scrollViews.firstMatch.swipeUp() }
-        for _ in 0..<8 where !objetivo.isHittable { app.scrollViews.firstMatch.swipeDown() }
-        XCTAssertTrue(objetivo.isHittable, "«\(id)» no es tocable tras deslizar", file: file, line: line)
+        func entero() -> Bool {
+            switch vistaVisible.encaje(de: [objetivo.frame]) {
+            case .yaEncaja, .noCabe: return objetivo.isHittable
+            case .desplazar, .marcoInvalido: return false
+            }
+        }
+        for _ in 0..<6 where !entero() {
+            let vista = vistaVisible
+            guard case .desplazar(let desplazamiento) = vista.encaje(de: [objetivo.frame]) else { break }
+            let paso = vista.abajo - vista.arriba - 40
+            arrastrar(max(-paso, min(paso, desplazamiento)))
+        }
+        XCTAssertTrue(
+            entero(), "«\(id)» no queda entero y tocable entre las barras: marco \(objetivo.frame), visible \(vistaVisible.arriba)…\(vistaVisible.abajo)",
+            file: file, line: line)
     }
 
     /// Escribe en el campo del asistente y espera a que muestre el texto completo.
     func escribir(_ texto: String, file: StaticString = #filePath, line: UInt = #line) {
         traer("agente-total-campo", file: file, line: line)
         let campo = elemento("agente-total-campo")
+        // El campo está entero a la vista: el punto del toque cae dentro de él y no bajo la cabecera.
         campo.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.2)).tap()
         XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 10), "El teclado no apareció", file: file, line: line)
         campo.typeText(texto)
@@ -206,12 +244,14 @@ final class TransMiVozAgenteTotalUITests: AgenteTotalUITestCase {
 
     // MARK: Auditoría automática de accesibilidad (falla el test si hay problemas)
 
+    // El asistente mide más que la vista: la auditoría recorre la pantalla entera (`auditarPantallaLarga`).
+
     func testAuditoriaAccesibilidadEnReposoYConRespuesta() throws {
         try lanzar()
-        try auditar(app, "agente-total-reposo", testCase: self)
+        try auditarPantallaLarga(app, "agente-total-reposo", caso: self)
         preguntar("hola")
         esperarEstado("[SIMULADO] Respuesta de prueba para: hola")
-        try auditar(app, "agente-total-respuesta", testCase: self)
+        try auditarPantallaLarga(app, "agente-total-respuesta", caso: self)
     }
 
     func testAuditoriaAccesibilidadEscuchando() throws {
@@ -219,7 +259,8 @@ final class TransMiVozAgenteTotalUITests: AgenteTotalUITestCase {
         let microfono = elemento("agente-total-microfono")
         microfono.tap()
         esperar(microfono, "value == %@", "escuchando", "El dictado no pasó a escuchar")
-        try auditar(app, "agente-total-escuchando", testCase: self)
+        try auditarPantallaLarga(app, "agente-total-escuchando", caso: self)
+        traer("agente-total-microfono")  // el recorrido termina al final de la pantalla: el micrófono quedó arriba
         microfono.tap()  // suelta la captura sintética
     }
 
@@ -229,7 +270,7 @@ final class TransMiVozAgenteTotalUITests: AgenteTotalUITestCase {
         microfono.tap()
         esperar(microfono, "value == %@", "sin permiso", "El micrófono no dijo que falta el permiso")
         XCTAssertTrue(elemento("agente-total-abrir-ajustes").waitForExistence(timeout: 10))
-        try auditar(app, "agente-total-sin-permiso", testCase: self)
+        try auditarPantallaLarga(app, "agente-total-sin-permiso", caso: self)
     }
 }
 
@@ -304,23 +345,11 @@ private let gruposDeAuditoria: [XCUIAccessibilityAuditType] = [
     .contrast, .all.subtracting([.contrast, .dynamicType, .textClipped]), .dynamicType, .textClipped,
 ]
 
-/// Auditoría completa en la posición actual. Falla en el acto con cualquier problema.
-private func auditar(_ app: XCUIApplication, _ contexto: String, testCase: XCTestCase, file: StaticString = #filePath, line: UInt = #line) throws {
-    var problemas: [String] = []
-    for tipos in gruposDeAuditoria { problemas += try hallazgos(app, tipos: tipos).map(\.descripcion) }
-    guard !problemas.isEmpty else { return }
-    let texto = XCTAttachment(string: problemas.joined(separator: "\n") + "\n\nJerarquía de accesibilidad:\n" + app.debugDescription)
-    texto.name = "auditoria-\(contexto)-problemas"
-    texto.lifetime = .keepAlways
-    testCase.add(texto)
-    XCTFail("Auditoría de accesibilidad (\(contexto)): \(problemas.count) problema(s):\n" + problemas.joined(separator: "\n"), file: file, line: line)
-}
-
-/// Auditoría de una pantalla que se desplaza (texto más grande). Con la pantalla en una posición, el contraste de un nodo
-/// RECORTADO por la barra de navegación o la de pestañas lo mide el sistema sobre un trozo; eso se difiere: el nodo debe
-/// aparecer ENTERO y sin problema en otra posición del recorrido. Todo lo demás (otro grupo, o un nodo entero a la vista)
-/// falla en el acto. Si un nodo diferido nunca se midió entero y limpio, `cerrar` falla.
-private final class RecorridoAuditado {
+/// Auditoría de una pantalla que se desplaza (el texto más grande, o una pantalla más larga que la vista). Con la pantalla en
+/// una posición, el contraste de un nodo RECORTADO por la barra de navegación o la de pestañas lo mide el sistema sobre un
+/// trozo; eso se difiere: el nodo debe aparecer ENTERO y sin problema en otra posición del recorrido. Todo lo demás (otro
+/// grupo, o un nodo entero a la vista) falla en el acto. Si un nodo diferido nunca se midió entero y limpio, `cerrar` falla.
+final class RecorridoAuditado {
     private struct Clave: Hashable {
         let identificador: String
         let etiqueta: String
@@ -336,9 +365,11 @@ private final class RecorridoAuditado {
         self.caso = caso
     }
 
-    /// Zona realmente visible: entre la barra de navegación y la de pestañas.
+    /// Zona realmente visible: entre la barra de navegación y la de pestañas, dentro del área desplazable (bajo la barra
+    /// puede haber una fila fija, como la cabecera de Inicio: lo que pasa por debajo de ella tampoco está entero a la vista).
     private var zona: (arriba: CGFloat, abajo: CGFloat) {
-        (app.navigationBars.firstMatch.frame.maxY, min(app.tabBars.firstMatch.frame.minY, app.scrollViews.firstMatch.frame.maxY))
+        let contenido = app.scrollViews.firstMatch.frame
+        return (max(app.navigationBars.firstMatch.frame.maxY, contenido.minY), min(app.tabBars.firstMatch.frame.minY, contenido.maxY))
     }
 
     private func entero(_ marco: CGRect, en zona: (arriba: CGFloat, abajo: CGFloat)) -> Bool {
@@ -378,10 +409,49 @@ private final class RecorridoAuditado {
         XCTFail("Auditoría de accesibilidad (\(contexto)): \(fallos.count) problema(s):\n" + fallos.joined(separator: "\n"), file: file, line: line)
     }
 
+    /// Vuelve al comienzo del contenido: hasta que un gesto ya no lo mueve, con tope.
+    func subirAlComienzo() throws {
+        for _ in 0..<8 {
+            let antes = try nodos().map { $0.marco }
+            app.scrollViews.firstMatch.swipeDown()
+            if try nodos().map({ $0.marco }) == antes { return }
+        }
+    }
+
+    /// Desde la posición actual baja de a un gesto lento y audita cada posición, hasta que el contenido deja de moverse
+    /// (llegó al final) o se agotan `tope` gestos.
+    func bajarAuditando(_ contexto: String, tope: Int = 12, file: StaticString = #filePath, line: UInt = #line) throws {
+        for paso in 1...tope {
+            let antes = try nodos().map { $0.marco }
+            app.scrollViews.firstMatch.swipeUp(velocity: .slow)
+            if try nodos().map({ $0.marco }) == antes { return }
+            try auditar("\(contexto)-paso-\(paso)", file: file, line: line)
+        }
+    }
+
     func cerrar(file: StaticString = #filePath, line: UInt = #line) {
         let sinMedir = diferidos.subtracting(limpios)
         guard !sinMedir.isEmpty else { return }
         let lista = sinMedir.map { "id=«\($0.identificador)» etiqueta=«\($0.etiqueta)»" }.sorted().joined(separator: "\n")
         XCTFail("Nodos con contraste diferido que nunca se midieron enteros y sin problema:\n" + lista, file: file, line: line)
     }
+}
+
+/// Auditoría completa, a tamaño normal, de una pantalla MÁS LARGA que la vista: desde el comienzo, cada posición con todos los
+/// grupos y sin filtros, hasta el final (`RecorridoAuditado`).
+///
+/// Por qué no basta una sola posición: con pilas ansiosas, los nodos que quedan bajo el área desplazable (entre su borde y
+/// el final de la pantalla) también llegan a la auditoría nativa de contraste, que los mide sobre la barra de pestañas. En
+/// la ejecución de iOS de `4a6871f` (run 43990196510, vista 116…775) fallaron así, y solo así, «agente-total-enlace-gps» en
+/// y 747…803 y «agente-total-privacidad-0» en y 835…888, y en la búsqueda de rutas «procedencia-catalogo» en y 843…859: una
+/// pantalla que no cabe entera nunca pasa en una sola posición, sea cual sea su color. Es la misma regla de las fases de
+/// Inicio, la sesión del accesorio, Emergencia y Diagnóstico: el contraste de un nodo recortado se difiere y ese mismo nodo
+/// debe medirse entero a la vista y sin problema en otra posición, o la prueba falla. Un problema de un nodo entero a la
+/// vista, o de cualquier otro tipo, falla en el acto, como antes.
+func auditarPantallaLarga(_ app: XCUIApplication, _ contexto: String, caso: XCTestCase, file: StaticString = #filePath, line: UInt = #line) throws {
+    let recorrido = RecorridoAuditado(app: app, caso: caso)
+    try recorrido.subirAlComienzo()
+    try recorrido.auditar(contexto, file: file, line: line)
+    try recorrido.bajarAuditando(contexto, file: file, line: line)
+    recorrido.cerrar(file: file, line: line)
 }

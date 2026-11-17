@@ -189,7 +189,8 @@ final class TransMiVozMetroUITests: ParidadUITestCase {
         lanzar()
         abrirMetro()
         XCTAssertTrue(elemento("metro-estado").waitForExistence(timeout: 10))
-        try auditar("metro-listo")
+        // La pantalla mide varias vistas (16 estaciones): la auditoría la recorre entera (`auditarPantallaLarga`).
+        try auditarPantallaLarga(app, "metro-listo", caso: self)
     }
 
     func testAuditoriaAccesibilidadMetroConError() throws {
@@ -414,7 +415,9 @@ final class TransMiVozGpsUITests: ParidadUITestCase {
     func testLosControlesMidenAlMenos44Puntos() throws {
         activar()
         XCTAssertTrue(elemento("gps-estacion-0").waitForExistence(timeout: 15))
-        for id in ["gps-detener", "gps-repetir", "gps-actualizar", "gps-orientar-0", "gps-orientar-3", "gps-mapas-0", "gps-mapas-3"] {
+        // En el orden de la pantalla, de arriba abajo: `exponer` solo desplaza hacia delante, y «gps-mapas-0» (primera
+        // estación) queda por encima de «gps-orientar-3» (cuarta). Los mismos siete controles y la misma medida.
+        for id in ["gps-detener", "gps-repetir", "gps-actualizar", "gps-orientar-0", "gps-mapas-0", "gps-orientar-3", "gps-mapas-3"] {
             comprobarTocable(id)
         }
     }
@@ -429,19 +432,20 @@ final class TransMiVozGpsUITests: ParidadUITestCase {
     func testAuditoriaAccesibilidadGpsConEstaciones() throws {
         activar()
         XCTAssertTrue(elemento("gps-estacion-0").waitForExistence(timeout: 15))
-        try auditar("gps-activo")
+        // Con estaciones la pantalla mide varias vistas: la auditoría la recorre entera (`auditarPantallaLarga`).
+        try auditarPantallaLarga(app, "gps-activo", caso: self)
     }
 
     func testAuditoriaAccesibilidadGpsPermisoDenegado() throws {
         activar(["-PRUEBAS_UI_GPS_PERMISO_DENEGADO"])
         XCTAssertTrue(elemento("gps-estado").waitForExistence(timeout: 10))
-        try auditar("gps-denegado")
+        try auditarPantallaLarga(app, "gps-denegado", caso: self)
     }
 
     func testAuditoriaAccesibilidadGpsConError() throws {
         activar(["-PRUEBAS_UI_GPS_FALLA"])
         XCTAssertTrue(elemento("gps-error").waitForExistence(timeout: 15))
-        try auditar("gps-error")
+        try auditarPantallaLarga(app, "gps-error", caso: self)
     }
 }
 

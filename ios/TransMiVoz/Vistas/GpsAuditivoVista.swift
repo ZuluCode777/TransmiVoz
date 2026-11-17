@@ -28,6 +28,7 @@ struct GpsAuditivoVista: View {
             }
             .padding(16)
         }
+        .pantallaWeb()
         .navigationTitle(TextoGps.titulo)
         .navigationBarTitleDisplayMode(.inline)
         .bordeInferiorLegible()
@@ -48,16 +49,21 @@ struct GpsAuditivoVista: View {
     // MARK: Contenido
 
     @ViewBuilder private func contenido(_ modelo: GpsAuditivoModelo) -> some View {
+        // Antes de activar, primero la explicación de privacidad. Con la ubicación en uso van primero los controles
+        // («Detener», «Repetir indicación», «Actualizar»), a la vista sin desplazar, y la explicación sigue en la pantalla, al final.
+        if !modelo.escuchando { privacidad }
+        controlDeUbicacion(modelo)
+        if modelo.estado == .activo { acciones(modelo) }
+        estadoDeUbicacion(modelo)
+        appDijo(modelo)
+        if modelo.estado == .activo || modelo.estado == .vencida { resultado(modelo) }
+        if modelo.escuchando { privacidad }
+    }
+
+    private var privacidad: some View {
         Text(TextoGps.privacidad)
             .tarjetaWeb()
             .accessibilityIdentifier("gps-privacidad")
-        controlDeUbicacion(modelo)
-        estadoDeUbicacion(modelo)
-        appDijo(modelo)
-        if modelo.estado == .activo || modelo.estado == .vencida {
-            if modelo.estado == .activo { acciones(modelo) }
-            resultado(modelo)
-        }
     }
 
     @ViewBuilder private func controlDeUbicacion(_ modelo: GpsAuditivoModelo) -> some View {
@@ -162,7 +168,7 @@ struct GpsAuditivoVista: View {
 
     @ViewBuilder private func resultado(_ modelo: GpsAuditivoModelo) -> some View {
         if modelo.consultando {
-            ProgressView(TextoGps.consultando).accessibilityIdentifier("gps-consultando")
+            ProgresoWeb(texto: TextoGps.consultando).accessibilityIdentifier("gps-consultando")
         }
         if let error = modelo.fallo {
             VStack(alignment: .leading, spacing: 8) {
@@ -173,9 +179,7 @@ struct GpsAuditivoVista: View {
                 Text(error.mensaje).accessibilityIdentifier("gps-error")
                 Text(error.recuperacion).foregroundStyle(.textoSecundario)
                 Button("Reintentar") { modelo.actualizar() }
-                    .buttonStyle(.bordered)
-                    .controlSize(.large)
-                    .frame(minHeight: 44)
+                    .buttonStyle(EstiloBotonSecundario())
                     .accessibilityIdentifier("gps-reintentar")
             }
         }
