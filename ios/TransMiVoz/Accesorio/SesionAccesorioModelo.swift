@@ -66,7 +66,7 @@ final class SesionAccesorioModelo {
     /// software, sin medir (banco).
     static let plazoEmparejamientoMs: Milisegundos = 35_000
     static let intentosMaximosReferencia = 3
-    /// Gracia de la VOZ ante un «sin datos» por caducidad ordinaria (`sinRecepcion` o `vencido`): el radar SEN0395 entrega una
+    /// Gracia de la VOZ ante un «sin datos» por caducidad ordinaria, incluida la fuente vencida (`sinResultado`): el SEN0395 entrega una
     /// observación por segundo y cada una vence a los 500 ms (contrato BLE §7), así que cerca de la mitad de cada segundo el
     /// estado crudo es «sin datos». Hasta cumplirse esta gracia CONTINUA, medida con el reloj monotónico desde el latido que
     /// ve el estado vencido, la voz no lo dice ni olvida lo último que dijo. NO cambia la frescura: el estado y la pantalla
@@ -621,12 +621,12 @@ final class SesionAccesorioModelo {
     /// lo reintenta con el estado de entonces. Lo mismo ocurre con un aviso que el límite de ritmo aplazó (`.limitado`).
     ///
     /// Hueco ordinario de datos (#41): con el radar a 1 Hz y la caducidad a 500 ms, el estado crudo pasa a «sin datos»
-    /// (`sinRecepcion` o `vencido`) y vuelve en cada trama. Mientras ese «sin datos» dura menos de `graciaSinDatosMs`
+    /// (`sinRecepcion`, `vencido` o `sinResultado`) y vuelve con una observación fresca. Mientras dura menos de `graciaSinDatosMs`
     /// seguidos y no se pide repetir, la voz calla («sin datos» no se dice) y NO olvida la última locución: la misma
     /// presencia o la misma ausencia de detección tras el hueco no reinicia su frase, y un estado distinto sí se dice. La
     /// lista no deja vigente la proximidad vencida (se cierra sin crear avisos nuevos) y al volver la misma situación se
     /// marca vigente otra vez, sin voz. Cumplida la gracia, «sin datos» se dice una vez y la recuperación dice el estado de
-    /// ahora. Sin gracia: avería de salud del radar, trama sana sin resultado, pérdida o fallo del accesorio, Bluetooth,
+    /// ahora. Sin gracia: avería de salud del radar, pérdida o fallo del accesorio, Bluetooth,
     /// repetir y recuperar el audio (`reanunciar`).
     ///
     /// La lista y «Repetir» llevan siempre «Enlace sin autenticar.» en los estados con reserva; la voz de ahora solo mientras
@@ -688,10 +688,10 @@ final class SesionAccesorioModelo {
     }
 
     /// Lleva la cuenta del «sin datos» por caducidad ordinaria y dice si sigue dentro de la gracia. Cualquier otro estado
-    /// (trama fresca, avería de salud, trama sana sin resultado, pérdida del accesorio) corta la cuenta: el siguiente hueco
+    /// (trama fresca, avería de salud, pérdida del accesorio) corta la cuenta: el siguiente hueco
     /// cuenta desde su propio inicio.
     private func huecoOrdinarioEnGracia(_ ahora: Milisegundos) -> Bool {
-        guard case .sinDatos(let motivo) = estado, motivo != .sinResultado else {
+        guard case .sinDatos = estado else {
             sinDatosDesdeMs = nil
             return false
         }

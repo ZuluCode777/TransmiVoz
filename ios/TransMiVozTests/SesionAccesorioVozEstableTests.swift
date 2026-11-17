@@ -46,11 +46,11 @@ private final class RadarDeMesa {
         banco.transporte.emitir(.notificacionesFijadas(true))
     }
 
-    /// Una trama del radar llega ahora (20 ms de antigüedad al emitirla, 20 ms en el aire).
-    func muestra(_ muestra: Muestra) {
+    /// Una notificación BLE llega ahora, con la edad de la fuente UART y 20 ms en el aire.
+    func muestra(_ muestra: Muestra, edadRadarMs: UInt16 = 20) {
         let transcurrido = banco.reloj.ahora - inicioReferenciaMs - 20
         let emision = emisionReferencia &+ UInt32(truncatingIfNeeded: transcurrido)
-        banco.transporte.emitir(.notificacionMedicion(trama(muestra, emision: emision)))
+        banco.transporte.emitir(.notificacionMedicion(trama(muestra, emision: emision, edadRadarMs: edadRadarMs)))
     }
 
     /// El temporizador de 100 ms de la sesión (`evaluar`) con el reloj falso. Cada locución dura menos que un latido.
@@ -75,11 +75,11 @@ private final class RadarDeMesa {
         return crudo
     }
 
-    private func trama(_ muestra: Muestra, emision: UInt32) -> Data {
+    private func trama(_ muestra: Muestra, emision: UInt32, edadRadarMs: UInt16 = 20) -> Data {
         var banderas: UInt8 = 0x01
         var distancia: UInt16 = 0xFFFF
         var azimut = Int16.min
-        var edad: UInt16 = 20
+        var edad = edadRadarMs
         var salud: UInt8 = 0
         switch muestra {
         case .sinBlanco: break
@@ -93,6 +93,12 @@ private final class RadarDeMesa {
             banderas = 0x00
             salud = s
             edad = 0xFFFF
+        }
+        // El emisor real conserva la edad pero borra las medidas cuando la fuente supera 500 ms (contrato §7).
+        if edad > 500 {
+            banderas = 0
+            distancia = 0xFFFF
+            azimut = Int16.min
         }
         secuencia &+= 1
         var datos = Data([0x01, banderas, UInt8(secuencia & 0xFF), UInt8(secuencia >> 8)])
@@ -142,6 +148,31 @@ final class VozEstableSesionAccesorioTests: XCTestCase {
     }
 
     // MARK: Cadencia de 1 Hz: estado crudo veraz y voz sin repeticiones
+
+    func testBleA10HzConFuenteA1HzNoRepiteLaFraseNiValidaLaFuenteVencida() throws {
+        let muestras: [(RadarDeMesa.Muestra, String)] = [(.presencia, presencia), (.sinBlanco, sinDeteccion)]
+        for (muestra, frase) in muestras {
+            let (banco, radar) = try montar()
+            defer { banco.cerrar() }
+            radar.latir(durante: 100)
+            radar.muestra(muestra)
+            let veces = dijo(banco, frase)
+            for _ in 0..<6 {
+                for edad in stride(from: 120, through: 920, by: 100) {
+                    radar.latir(durante: 100)
+                    radar.muestra(muestra, edadRadarMs: UInt16(edad))
+                    if edad > 500 {
+                        XCTAssertEqual(banco.modelo.estado, .sinDatos(.sinResultado))
+                        XCTAssertTrue(vigentes(banco).isEmpty, "la fuente vencida no deja una proximidad vigente")
+                    }
+                }
+                radar.latir(durante: 100)
+                radar.muestra(muestra)
+            }
+            XCTAssertEqual(dijo(banco, frase), veces, "la misma detección no reinicia su frase tras cada hueco")
+            XCTAssertEqual(dijo(banco, sinDatos), 0, "las notificaciones de fuente vencida tampoco se hablan en cada ciclo")
+        }
+    }
 
     func testPresenciaA1HzNoRepiteLaFraseYElEstadoCrudoSigueVenciendo() throws {
         let (banco, radar) = try montar()
@@ -318,15 +349,27 @@ final class VozEstableSesionAccesorioTests: XCTestCase {
         XCTAssertEqual(vigentes(banco), [.datoVencido])
     }
 
-    func testUnaTramaSanaSinResultadoNoEsCaducidadOrdinariaYSeDiceAlInstante() throws {
+    func testLaFuenteVencidaUsaLaGraciaAunqueLleguenNotificacionesCada100ms() throws {
         let (banco, radar) = try montar()
         defer { banco.cerrar() }
         radar.latir(durante: 100)
         radar.muestra(.presencia)
         radar.latir(durante: 200)
-        radar.muestra(.sinResultado)
+        radar.muestra(.presencia, edadRadarMs: 800)
         XCTAssertEqual(banco.modelo.estado, .sinDatos(.sinResultado))
-        XCTAssertEqual(banco.salida.dicho.last, sinDatos)
+        for edad in stride(from: 900, through: 2700, by: 100) {
+            radar.latir(durante: 100)
+            radar.muestra(.presencia, edadRadarMs: UInt16(edad))
+            XCTAssertEqual(banco.modelo.estado, .sinDatos(.sinResultado))
+        }
+        radar.latir(durante: 99)
+        radar.muestra(.presencia, edadRadarMs: 2799)
+        XCTAssertEqual(dijo(banco, sinDatos), 0, "a los 1999 ms el mismo hueco sigue sin hablar")
+        XCTAssertTrue(vigentes(banco).isEmpty)
+        radar.latir(durante: 1)
+        radar.muestra(.presencia, edadRadarMs: 2800)
+        XCTAssertEqual(dijo(banco, sinDatos), 1, "a los 2000 ms avisa pese a recibir BLE cada 100 ms")
+        XCTAssertEqual(vigentes(banco), [.datoVencido])
     }
 
     func testPerderElAccesorioDuranteUnHuecoSeDiceAlInstanteYLaReconexionEmpiezaDeCero() throws {
