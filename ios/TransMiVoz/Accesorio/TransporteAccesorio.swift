@@ -45,6 +45,10 @@ enum MotivoFalla: Equatable {
 enum EventoTransporte: Equatable {
     case disponibilidad(DisponibilidadBluetooth)
     case encontrado(AccesorioDetectado)
+    /// `didConnect`: hay enlace con el periférico y falta descubrir el servicio. Desde aquí corre el plazo del
+    /// descubrimiento; antes, la conexión pedida espera sin plazo a que el accesorio aparezca. Un transporte puede
+    /// no emitirlo y pasar directo a `.conectado`.
+    case enlaceAbierto
     /// Enlace establecido y servicio con sus dos características descubiertos.
     case conectado(id: String)
     /// Respuesta a `comprobarEnlace`: la lectura protegida de comprobación de esta conexión terminó sin error.
@@ -80,8 +84,9 @@ protocol TransporteAccesorio: AnyObject {
     var permisoPorPreguntar: Bool { get }
     func buscar()
     func dejarDeBuscar()
-    /// Pide la conexión. Si el cierre de una anterior con el mismo periférico sigue en curso, espera su
-    /// aviso (el plazo lo vigila la sesión). Todo evento de esta conexión lleva este `token`.
+    /// Pide la conexión. Core Bluetooth no la vence: queda pendiente hasta que el accesorio aparezca. Si el cierre
+    /// de una anterior con el mismo periférico sigue en curso, espera su aviso. Todo evento de esta conexión lleva
+    /// este `token`.
     func conectar(id: String, token: Int)
     /// Lectura protegida de comprobación (Información), antes de consultar `nivelEnlace`. Si el enlace no está
     /// protegido, iOS empareja por su cuenta y puede pedir la clave a la persona. Termina con
