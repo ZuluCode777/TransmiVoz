@@ -18,10 +18,10 @@
 #   SIMULADOR_NOMBRE       modelo de iPhone del Simulator (por defecto «iPhone 17»)
 #   PRUEBAS_MINIMAS        mínimo de pruebas que deben ejecutarse (por defecto 50)
 #   OMITIR_PRUEBAS         pruebas que `pruebas-simulador` no ejecuta (`-skip-testing:`), separadas
-#                          por espacios, en la forma Objetivo/Clase/prueba. En la CI (CI=true)
-#                          omite por defecto las dos auditorías lentas del accesorio con texto
-#                          muy grande (unos 40 min de los 90 que permite el job); en local no
-#                          omite ninguna. OMITIR_PRUEBAS="" las ejecuta también en la CI.
+#                          por espacios, en la forma Objetivo/Clase o Objetivo/Clase/prueba. En la
+#                          CI (CI=true) omite por defecto las clases dedicadas al texto MUY grande
+#                          (OMITIR_TEXTO_MUY_GRANDE, abajo); en local no omite ninguna.
+#                          OMITIR_PRUEBAS="" las ejecuta también en la CI.
 #
 # Nunca se sustituye en silencio una herramienta o un destino por otro: si no
 # coincide con lo pedido, el script falla y dice qué encontró.
@@ -43,9 +43,30 @@ ESQUEMA="TransMiVoz"
 # Carpeta nueva por ejecución. Se exporta para que los pasos que `todo` lanza
 # como procesos hijos escriban en la MISMA carpeta.
 SALIDA="${SALIDA:-$RAIZ/ios/salida/$(date -u +%Y%m%dT%H%M%SZ)-$$}"
+# Clases de pruebas de interfaz dedicadas al texto MUY grande: TODAS sus pruebas lanzan la app con
+# `UICTContentSizeCategoryAccessibilityXXXL` (comprobado una por una en `ios/TransMiVozUITests/`). Su diseño con ese
+# tamaño SIGUE PENDIENTE por decisión del dueño (16/11/2026): el pase visual de tamaño estándar no lo reparó y no hay
+# fecha para hacerlo; por eso la CI no las ejecuta (el Accesorio, además, tarda unos 40 min de los 90 que permite el
+# job). Dynamic Type sigue activo en toda la app. Nada de tamaño normal está aquí: las auditorías de accesibilidad, contraste y área táctil a
+# tamaño estándar y la prueba de quitar favoritas se ejecutan siempre. Una clase mixta (p. ej. `TransMiVozDictadoUITests`,
+# que tiene una prueba a texto muy grande entre seis estándar) NO se omite entera. Si añades una clase dedicada, agrégala
+# aquí; `ios/scripts/probar-comprobar-ios.sh` comprueba que cada nombre exista y termine en `TextoGrandeUITests`.
+OMITIR_TEXTO_MUY_GRANDE="\
+TransMiVozUITests/TransMiVozTextoGrandeUITests \
+TransMiVozUITests/TransMiVozInicioTextoGrandeUITests \
+TransMiVozUITests/TransMiVozAjustesTextoGrandeUITests \
+TransMiVozUITests/TransMiVozAvisosTextoGrandeUITests \
+TransMiVozUITests/TransMiVozAnunciosTextoGrandeUITests \
+TransMiVozUITests/TransMiVozRutasTextoGrandeUITests \
+TransMiVozUITests/TransMiVozAccesorioTextoGrandeUITests \
+TransMiVozUITests/TransMiVozAgenteTotalTextoGrandeUITests \
+TransMiVozUITests/TransMiVozEmergenciaTextoGrandeUITests \
+TransMiVozUITests/TransMiVozDiagnosticoTextoGrandeUITests \
+TransMiVozUITests/TransMiVozMetroTextoGrandeUITests \
+TransMiVozUITests/TransMiVozGpsTextoGrandeUITests"
 # Sin dos puntos a propósito: OMITIR_PRUEBAS definida y vacía no omite nada.
 if [ "${CI:-}" = "true" ]; then
-  OMITIR_PRUEBAS="${OMITIR_PRUEBAS-TransMiVozUITests/TransMiVozAccesorioTextoGrandeUITests/testAuditoriaConTextoMuyGrande TransMiVozUITests/TransMiVozAccesorioTextoGrandeUITests/testAuditoriaPermisoDenegadoConTextoMuyGrande}"
+  OMITIR_PRUEBAS="${OMITIR_PRUEBAS-$OMITIR_TEXTO_MUY_GRANDE}"
 else
   OMITIR_PRUEBAS="${OMITIR_PRUEBAS-}"
 fi

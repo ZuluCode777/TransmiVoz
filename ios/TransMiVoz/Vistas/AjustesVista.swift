@@ -1,12 +1,12 @@
 import SwiftUI
 
 /// Pestaña Ajustes. El servidor es la primera sección y va directo en la pantalla (mismos identificadores que
-/// cuando la pestaña se llamaba Servidor). Preferencias, Favoritas y Ayuda están en el menú «Más ajustes» de la barra:
+/// cuando la pestaña se llamaba Servidor). Preferencias, Favoritas, Diagnóstico y Ayuda están en el menú «Más ajustes» de la barra:
 /// debajo del formulario del servidor, con texto grande, sus filas quedarían cortadas por la barra de pestañas.
 struct AjustesVista: View {
     let entorno: EntornoApp
 
-    private enum Seccion: Hashable { case preferencias, favoritas, ayuda }
+    private enum Seccion: Hashable { case preferencias, favoritas, diagnostico, ayuda }
 
     @State private var seccion: Seccion?
 
@@ -18,18 +18,20 @@ struct AjustesVista: View {
                         Menu {
                             Button { seccion = .preferencias } label: { Label("Preferencias", systemImage: "slider.horizontal.3") }
                             Button { seccion = .favoritas } label: { Label("Favoritas", systemImage: "heart") }
+                            Button { seccion = .diagnostico } label: { Label("Diagnóstico", systemImage: "stethoscope") }
                             Button { seccion = .ayuda } label: { Label("Ayuda", systemImage: "questionmark.circle") }
                         } label: {
                             Label("Más ajustes", systemImage: "ellipsis.circle")
                         }
-                        .accessibilityHint("Preferencias, Favoritas y Ayuda")
+                        .accessibilityHint("Preferencias, Favoritas, Diagnóstico y Ayuda")
                         .accessibilityIdentifier("menu-mas-ajustes")
                     }
                 }
                 .navigationDestination(item: $seccion) { seccion in
                     switch seccion {
-                    case .preferencias: PreferenciasVista(accesorio: entorno.accesorio)
+                    case .preferencias: PreferenciasVista(accesorio: entorno.accesorio, altoContraste: entorno.altoContraste)
                     case .favoritas: FavoritasVista(modelo: entorno.favoritas)
+                    case .diagnostico: DiagnosticoVista(ajustes: entorno.ajustes, voz: entorno.avisos.voz, modoPruebas: entorno.modoPruebas)
                     case .ayuda: AyudaVista()
                     }
                 }

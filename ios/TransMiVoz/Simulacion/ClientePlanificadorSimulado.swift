@@ -60,9 +60,10 @@ struct ClientePlanificadorSimulado: ClientePlanificador {
                 descenso: ParadaViaje(nombre: Self.sur, coordenada: Self.puntoSur),
                 estacionesRecorridas: 3, conteoVerificado: true,
                 trazado: [Self.puntoNorte, Self.puntoCentro, Self.puntoSur])
+            // Un tramo directo con otra ruta directa: el simulado también ofrece «También te sirven…».
             return PlanViaje(
                 origen: origen, destino: destino, resultado: .operativo, tramos: [tramo], rutasPorElTrazado: [],
-                catalogo: Self.catalogo)
+                alternativas: ["Z98"], catalogo: Self.catalogo)
         }
         if origen == Self.centro && destino == Self.sur {
             // Operación sin confirmar: solo el código de la ruta, sin paradas ni mapa.

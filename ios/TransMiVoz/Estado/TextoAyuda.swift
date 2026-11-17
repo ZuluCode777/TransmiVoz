@@ -26,19 +26,22 @@ struct SeccionAyuda: Equatable, Sendable {
 enum TextoAyuda {
     static let secciones: [SeccionAyuda] = [
         SeccionAyuda(titulo: "Qué hace la app", parrafos: [
-            "TransMiVoz te orienta con el transporte público de Bogotá. En el iPhone tiene tres partes: Sesión, Consulta y Ajustes.",
+            "TransMiVoz te orienta con el transporte público de Bogotá. En el iPhone tiene cinco pestañas: Inicio, Sesión, Consulta, Avisos y Ajustes. Desde Inicio se abren las rutas, «Mapa y GPS», «Metro de Bogotá», la lupa y Emergencia.",
         ]),
         SeccionAyuda(titulo: "Cómo usarla", parrafos: [
-            "Ajustes: escribe la dirección del servidor y, si te la dieron, la clave. Sin servidor, la Consulta no responde. En el menú «Más ajustes», arriba a la derecha, están Preferencias, Favoritas y esta Ayuda.",
+            "Ajustes: escribe la dirección del servidor y, si te la dieron, la clave. Sin servidor, la Consulta no responde. En el menú «Más ajustes», arriba a la derecha, están Preferencias, Favoritas, el Diagnóstico (comprueba en vivo que cada función responde) y esta Ayuda.",
             "Consulta: escribe tu pregunta, por ejemplo una ruta o una estación, y toca Enviar. Necesita conexión a internet y no envía tu ubicación.",
             "Sesión: es para el accesorio de proximidad por Bluetooth. Puedes buscarlo, elegirlo e iniciar la sesión. Las medidas y los avisos del sensor se ven y se dicen con una reserva, porque el enlace con el accesorio no está autenticado (más abajo, «Accesorio de proximidad»).",
+        ]),
+        SeccionAyuda(titulo: "Mapa y GPS", parrafos: [
+            "«Mapa y GPS», en Inicio, te dice por voz qué estaciones de TransMilenio están cerca. Solo pide tu ubicación cuando tú la activas allí y solo mientras esa pantalla está abierta: la envía al servidor para ordenar las estaciones y la app no la guarda ni la registra. Al cambiar de pestaña o salir de la app se suelta, y no funciona en segundo plano. Si no la activas, escribe en Consulta desde qué estación sales.",
         ]),
         SeccionAyuda(titulo: "Límites de la Consulta", parrafos: [
             "Las respuestas son orientación, no una guía para abordar: la app no da órdenes de abordaje y no verifica paradas ni sentido. Confirma la ruta, la parada y el sentido en la señalización y con el personal de TransMilenio.",
             "Los datos vienen del servidor y pueden estar desactualizados.",
         ]),
         SeccionAyuda(titulo: "Metro de Bogotá", parrafos: [
-            "El Metro de Bogotá es un proyecto futuro: la Línea 1 está en construcción y no presta servicio. La app para iPhone no tiene pantalla de Metro ni planea viajes en Metro. Si preguntas por el Metro en Consulta, el servidor responde solo con información.",
+            "El Metro de Bogotá es un proyecto futuro: la Línea 1 está en construcción y no presta servicio. La pantalla «Metro de Bogotá» de Inicio muestra su catálogo informativo (16 estaciones, un mapa ilustrativo y las fuentes), no planea viajes en Metro y no usa tu ubicación. Si preguntas por el Metro en Consulta, el servidor responde solo con información.",
         ]),
         // Se reutiliza el texto del accesorio, no una copia: si cambia allí, cambia aquí. El aviso va en un solo párrafo
         // (en la pantalla de Sesión se parte por el tamaño del texto) para que VoiceOver no se detenga a media frase.

@@ -10,6 +10,10 @@ protocol ClientePlanificador: Sendable {
     func detalleRuta(codigo: String) async throws -> DetalleRuta
     func listarLugares() async throws -> ListaLugares
     func planearViaje(origen: String, destino: String) async throws -> PlanViaje
+    /// Metro de la Línea 1: catálogo educativo de un proyecto futuro, sin servicio. No depende del de TransMilenio.
+    func metroLinea1() async throws -> RespuestaMetro
+    /// Las estaciones más cercanas a una lectura de ubicación. La lectura viaja en el cuerpo y no se guarda ni se registra.
+    func estacionesCercanas(_ lectura: LecturaParaEnviar) async throws -> RespuestaEstacionesCercanas
 }
 
 /// `POST /api/planificador` con HTTP Basic sobre HTTPS, sin reintentos automáticos. Reutiliza la sesión privada,
@@ -45,6 +49,14 @@ struct ClientePlanificadorHTTP: ClientePlanificador {
 
     func planearViaje(origen: String, destino: String) async throws -> PlanViaje {
         try await enviar(.planearViaje(origen: origen, destino: destino))
+    }
+
+    func metroLinea1() async throws -> RespuestaMetro {
+        try await enviar(.metroLinea1)
+    }
+
+    func estacionesCercanas(_ lectura: LecturaParaEnviar) async throws -> RespuestaEstacionesCercanas {
+        try await enviar(.estacionesCercanas(lectura))
     }
 
     private func enviar<Respuesta: RespuestaPlanificador>(_ pedida: PeticionPlanificador) async throws -> Respuesta {

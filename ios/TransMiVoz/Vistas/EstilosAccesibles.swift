@@ -1,10 +1,9 @@
 import SwiftUI
 
 extension ShapeStyle where Self == Color {
-    /// Texto secundario con contraste suficiente (≥ 4,5:1) en claro y oscuro.
-    /// `.secondary` del sistema (~3,3:1 en claro) no pasa la auditoría de contraste
-    /// en texto pequeño. Parte de `label`, que el sistema adapta al modo, sin blanco ni negro fijos.
-    static var textoSecundario: Color { Color(uiColor: .label).opacity(0.7) }
+    /// Texto secundario: `muted-foreground` de la web (negro en claro, neón en oscuro), opaco. Antes era `label` al 70 %:
+    /// sobre las tarjetas lima se mezclaba con el relleno y la auditoría de contraste lo medía mal.
+    static var textoSecundario: Color { Paleta.mutedForeground }
 
     /// Rojo para acciones destructivas con contraste ≥ 7:1. El rojo del sistema
     /// (#FF383C) da ~3,6:1 sobre blanco y la auditoría lo marca "casi aprobado".
@@ -31,20 +30,6 @@ extension ShapeStyle where Self == Color {
     static var fondoAccionInhabilitada: Color { Color(uiColor: .secondarySystemBackground) }
 }
 
-/// Botón no disponible: sin relleno de color y con borde discontinuo, así se distingue de uno disponible
-/// por forma y no solo por tono (también con contraste alto). El estado «deshabilitado» lo da `.disabled`.
-struct EstiloAccionInhabilitada: ButtonStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .foregroundStyle(Color.textoAccionInhabilitada)
-            .multilineTextAlignment(.center)
-            .padding(.horizontal, 20)
-            .padding(.vertical, 12)
-            .background(Color.fondoAccionInhabilitada, in: Capsule())
-            .overlay(Capsule().strokeBorder(Color.textoAccionInhabilitada, style: StrokeStyle(lineWidth: 1.5, dash: [5, 3])))
-    }
-}
-
 extension View {
     /// El margen exterior evita que ScrollView extienda su marco bajo la barra de pestañas.
     func bordeInferiorLegible() -> some View { padding(.bottom) }
@@ -60,15 +45,15 @@ extension View {
         }
     }
 
-    /// Estilo del sistema (relleno o contorno) si la acción está disponible; si no, `EstiloAccionInhabilitada`
-    /// y `.disabled`. Estilo y bloqueo salen del mismo valor para que no se desacoplen.
-    @ViewBuilder func accion(prominente: Bool, disponible: Bool) -> some View {
-        if !disponible {
-            buttonStyle(EstiloAccionInhabilitada()).disabled(true)
-        } else if prominente {
-            buttonStyle(.borderedProminent)
+    /// Botón principal o secundario de la web, bloqueado si la acción no está disponible. Estilo y bloqueo salen del mismo
+    /// valor para que no se desacoplen; el aspecto de «no disponible» (borde discontinuo, contraste ≥ 4,5:1) lo pone el estilo.
+    /// Los estilos del sistema (`.borderedProminent`, `.bordered`) dependen del color de acento y no pasan la auditoría.
+    /// `compacta`: 48 pt de alto mínimo en vez de 56 (pantallas con muchos controles seguidos).
+    @ViewBuilder func accion(prominente: Bool, disponible: Bool, compacta: Bool = false) -> some View {
+        if prominente {
+            buttonStyle(EstiloBotonPrimario(compacto: compacta)).disabled(!disponible)
         } else {
-            buttonStyle(.bordered)
+            buttonStyle(EstiloBotonSecundario(compacto: compacta)).disabled(!disponible)
         }
     }
 }

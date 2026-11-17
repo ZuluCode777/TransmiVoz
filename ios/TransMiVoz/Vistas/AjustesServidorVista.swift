@@ -24,6 +24,7 @@ struct AjustesServidorVista: View {
             }
             .padding(16)
         }
+        .pantallaWeb()
         .navigationTitle("Ajustes")
         .navigationBarTitleDisplayMode(.inline)
         .scrollDismissesKeyboard(.interactively)
@@ -57,28 +58,27 @@ struct AjustesServidorVista: View {
             etiqueta("Dirección del servidor")
             TextField("https://", text: $modelo.origenTexto, axis: .vertical)
                 .lineLimit(1...3)
-                .textFieldStyle(.roundedBorder)
+                .campoWeb()
                 .keyboardType(.URL)
                 .textContentType(.URL)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
                 .submitLabel(.done)
                 .focused($campoEnfocado, equals: .origen)
-                .frame(minHeight: 44)
                 .accessibilityLabel("Dirección del servidor")
                 .accessibilityIdentifier("campo-origen")
 
             etiqueta("Clave de acceso (opcional)")
             SecureField("Clave", text: $modelo.claveTexto)
-                .textFieldStyle(.roundedBorder)
+                .campoWeb()
                 .textContentType(.password)
                 .submitLabel(.done)
                 .focused($campoEnfocado, equals: .clave)
-                .frame(minHeight: 44)
                 .accessibilityLabel("Clave de acceso (opcional)")
                 .accessibilityIdentifier("campo-clave")
 
             Toggle("Recordar la clave en el Llavero", isOn: $modelo.recordarClave)
+                .tint(Paleta.ok)
                 .frame(minHeight: 44)
                 .accessibilityIdentifier("interruptor-recordar")
 
@@ -101,31 +101,20 @@ struct AjustesServidorVista: View {
     }
 
     private var botonAplicar: some View {
-        Button {
+        Button("Aplicar") {
             campoEnfocado = nil
             modelo.aplicar()
-        } label: {
-            Text("Aplicar").foregroundStyle(Color(uiColor: .systemBackground))
         }
-        .font(.body)
-        .buttonStyle(.borderedProminent)
-        .controlSize(.large)
-        .frame(minHeight: 44)
+        .buttonStyle(EstiloBotonPrimario())
         .accessibilityIdentifier("boton-aplicar")
     }
 
     private var botonOlvidar: some View {
-        Button(role: .destructive) {
+        Button("Olvidar clave", role: .destructive) {
             campoEnfocado = nil
             modelo.olvidarClave()
-        } label: {
-            Text("Olvidar clave").foregroundStyle(Color(uiColor: .systemBackground))
         }
-        .font(.body)
-        .buttonStyle(.borderedProminent)
-        .controlSize(.large)
-        .tint(.rojoAccesible)
-        .frame(minHeight: 44)
+        .buttonStyle(EstiloBotonPeligro())
         .accessibilityIdentifier("boton-olvidar")
     }
 }

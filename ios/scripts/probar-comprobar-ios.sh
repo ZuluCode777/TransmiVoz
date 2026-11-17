@@ -50,16 +50,38 @@ fi
 usar_salida_fija() { [ "$(env SALIDA="$TEMPORAL/fija" bash -c 'source "$1" && echo "$SALIDA"' _ "$SCRIPT")" = "$TEMPORAL/fija" ]; }
 comprobar "una SALIDA explícita se respeta" usar_salida_fija
 
-# OMITIR_PRUEBAS: en la CI omite solo las dos auditorías lentas del accesorio; en local, nada;
-# definida y vacía, nada también en la CI.
+# OMITIR_PRUEBAS: en la CI omite solo las clases dedicadas al texto MUY grande; en local, nada; definida y vacía, nada
+# también en la CI.
 omitidas_con() { env -u OMITIR_PRUEBAS "$@" bash -c 'source "$1" && printf %s "$OMITIR_PRUEBAS"' _ "$SCRIPT"; }
-lentas="TransMiVozUITests/TransMiVozAccesorioTextoGrandeUITests/testAuditoriaConTextoMuyGrande TransMiVozUITests/TransMiVozAccesorioTextoGrandeUITests/testAuditoriaPermisoDenegadoConTextoMuyGrande"
-omite_lentas_en_ci() { [ "$(omitidas_con CI=true SALIDA="$TEMPORAL/fija")" = "$lentas" ]; }
-comprobar "en la CI se omiten solo las dos auditorías lentas del accesorio" omite_lentas_en_ci
+texto_muy_grande="$(env -u OMITIR_PRUEBAS bash -c 'source "$1" && printf %s "$OMITIR_TEXTO_MUY_GRANDE"' _ "$SCRIPT")"
+omite_texto_muy_grande_en_ci() { [ -n "$texto_muy_grande" ] && [ "$(omitidas_con CI=true SALIDA="$TEMPORAL/fija")" = "$texto_muy_grande" ]; }
+comprobar "en la CI se omiten solo las clases dedicadas al texto muy grande" omite_texto_muy_grande_en_ci
 no_omite_en_local() { [ -z "$(omitidas_con -u CI SALIDA="$TEMPORAL/fija")" ]; }
 comprobar "en local no se omite ninguna prueba" no_omite_en_local
 vacia_no_omite() { [ -z "$(env CI=true OMITIR_PRUEBAS= SALIDA="$TEMPORAL/fija" bash -c 'source "$1" && printf %s "$OMITIR_PRUEBAS"' _ "$SCRIPT")" ]; }
 comprobar "OMITIR_PRUEBAS vacía no omite nada en la CI" vacia_no_omite
+# La lista es estrecha: cada entrada es una CLASE (no una prueba suelta ni un objetivo entero), se llama «…TextoGrandeUITests»
+# y existe de verdad en ios/TransMiVozUITests (un nombre mal escrito no omitiría nada y la prueba volvería a fallar en la CI).
+lista_estrecha() {
+  local entrada clase
+  for entrada in $texto_muy_grande; do
+    [ "$(printf %s "$entrada" | tr -cd / | wc -c | tr -d ' ')" = 1 ] || { echo "no es una clase: $entrada" >&2; return 1; }
+    [ "${entrada%%/*}" = "TransMiVozUITests" ] || { echo "objetivo inesperado: $entrada" >&2; return 1; }
+    clase="${entrada#*/}"
+    case "$clase" in *TextoGrandeUITests) ;; *) echo "no es de texto grande: $entrada" >&2; return 1 ;; esac
+    grep -Eq "^(final )?class $clase\b" "$RAIZ"/ios/TransMiVozUITests/*.swift || { echo "no existe: $clase" >&2; return 1; }
+  done
+}
+comprobar "las clases omitidas existen y son solo de texto muy grande" lista_estrecha
+# Y ninguna clase de texto muy grande queda fuera sin decirlo: una clase nueva con «TextoGrandeUITests» debe agregarse a la lista
+# (o a esta excepción, con su razón).
+sin_clase_olvidada() {
+  local clase
+  for clase in $(grep -hEo "^(final )?class [A-Za-z0-9_]*TextoGrandeUITests" "$RAIZ"/ios/TransMiVozUITests/*.swift | awk '{print $NF}'); do
+    case " $texto_muy_grande " in *"/$clase "*) ;; *) echo "falta en OMITIR_TEXTO_MUY_GRANDE: $clase" >&2; return 1 ;; esac
+  done
+}
+comprobar "toda clase «…TextoGrandeUITests» está en la lista de omitidas" sin_clase_olvidada
 
 # El uso (sin argumentos) sale con 2 y no crea carpetas.
 env SALIDA="$TEMPORAL/uso" "$SCRIPT" >/dev/null 2>&1; codigo=$?

@@ -25,6 +25,8 @@ final class EntornoApp {
     /// Modo de visualización (Baja visión o Ceguera total), guardado en este iPhone. En las pruebas de interfaz parte
     /// siempre de Baja visión y no deja nada guardado.
     let modo: ModoAppModelo
+    /// «Alto contraste» elegido por la persona; sin elección, la app sigue la apariencia del sistema.
+    let altoContraste: AltoContrasteModelo
     /// `true` solo en las pruebas de interfaz (compilación de depuración).
     let modoPruebas: Bool
 
@@ -42,7 +44,11 @@ final class EntornoApp {
         self.accesorio = accesorio
         self.monitorAudio = monitorAudio
         self.modoPruebas = modoPruebas
-        modo = ModoAppModelo(almacen: AlmacenModoUserDefaults(preferencias: Self.preferenciasDelModo(modoPruebas: modoPruebas)))
+        // El modo y el alto contraste comparten preferencias: en las pruebas de interfaz, la suite que se vacía en cada arranque.
+        let preferenciasDelModo = Self.preferenciasDelModo(modoPruebas: modoPruebas)
+        modo = ModoAppModelo(almacen: AlmacenModoUserDefaults(preferencias: preferenciasDelModo))
+        altoContraste = AltoContrasteModelo(almacen: AlmacenModoUserDefaults(
+            preferencias: preferenciasDelModo, clave: AlmacenModoUserDefaults.claveAltoContraste))
         #if DEBUG
         // En las pruebas de interfaz el planificador es el simulado, rotulado, sin red.
         let planificador: ClientePlanificador
@@ -54,7 +60,23 @@ final class EntornoApp {
         #else
         let planificador: ClientePlanificador = ClientePlanificadorHTTP { await ajustes.configuracion }
         #endif
-        serviciosRutas = ServiciosRutas(cliente: planificador, favoritas: favoritas, modoPruebas: modoPruebas)
+        // El dictado es el de la consulta y la voz la de los avisos, que en cada fábrica es la misma de la app: «Buscar hablando» y
+        // «Escuchar» no abren un segundo reconocedor ni un segundo dueño del audio.
+        // «Mapa y GPS» habla por la misma voz y manda la lectura por el mismo cliente del planificador.
+        let gps = GpsAuditivoModelo(
+            cliente: planificador, proveedor: Self.proveedorDeUbicacion(modoPruebas: modoPruebas),
+            locutor: LocutorControlVoz(voz: avisos.voz))
+        serviciosRutas = ServiciosRutas(
+            cliente: planificador, favoritas: favoritas, modoPruebas: modoPruebas, dictado: consulta.dictado, voz: avisos.voz,
+            gps: gps)
+    }
+
+    /// CoreLocation «al usar la app»; en las pruebas de interfaz, la ubicación sintética rotulada (sin GPS ni aviso del sistema).
+    private static func proveedorDeUbicacion(modoPruebas: Bool) -> ProveedorUbicacion {
+        #if DEBUG
+        if modoPruebas { return UbicacionSintetica(argumentos: ProcessInfo.processInfo.arguments) }
+        #endif
+        return UbicacionCoreLocation()
     }
 
     /// `UserDefaults` normales, o en las pruebas de interfaz una suite que se vacía en cada arranque: ningún modo elegido en una

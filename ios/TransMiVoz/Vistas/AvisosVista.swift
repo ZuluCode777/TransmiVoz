@@ -30,6 +30,7 @@ struct AvisosVista: View {
                 }
                 .padding(16)
             }
+            .pantallaWeb()
             .navigationTitle(TextoAvisos.titulo)
             .navigationBarTitleDisplayMode(.inline)
             .bordeInferiorLegible()
@@ -96,7 +97,7 @@ struct AvisosVista: View {
             contenido()
         }
         .padding(12)
-        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Color(uiColor: .separator), lineWidth: 1.5))
+        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Paleta.border, lineWidth: Tema.borde))
         .accessibilityElement(children: .contain)
     }
 
@@ -129,6 +130,7 @@ struct AvisosVista: View {
                 Text(TextoAvisos.silenciarAdvertencias)
                     .accessibilityIdentifier("etiqueta-silenciar-advertencias")
             }
+            .tint(Paleta.ok)
             .frame(minHeight: 44)
             .accessibilityIdentifier("interruptor-silenciar-advertencias")
     }
@@ -162,9 +164,7 @@ struct AvisosVista: View {
             }
             if vigente {
                 Button("Repetir") { centro.repetir(aviso.tipo) }
-                    .buttonStyle(.bordered)
-                    .controlSize(.large)
-                    .frame(minHeight: 44)
+                    .buttonStyle(EstiloBotonSecundario())
                     .accessibilityLabel("Repetir el aviso: \(titulo)")
                     .accessibilityIdentifier("\(id)-repetir")
             }

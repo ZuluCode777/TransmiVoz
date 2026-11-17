@@ -13,7 +13,7 @@ Un módulo local, `CentroAvisos`, por el que pasa todo aviso antes de la voz y d
 | Proximidad | Urgente | `SesionAccesorioModelo`: objeto, presencia | El de `TextoAccesorio.locucion` |
 | Red caída | Advertencia | Resultado de la consulta `sinConexion`, observado desde `RaizVista` (`CentroAvisos.consultaCambio`) | `TextoAvisos.redCaida` |
 | Datos viejos | Advertencia | Respuesta con `catalogo.antiguo` (EA-17), mismo puente | `TextoAvisos.datosViejos` |
-| GPS impreciso | Advertencia | **Nadie todavía**: la app no usa ubicación (no hay CoreLocation ni permiso). La clase y su texto existen para quien integre la ubicación (#51) con `centro.emitir(.gpsImpreciso, TextoAvisos.gpsImpreciso)` (prueba `testElGpsImpreciosoSeEmiteComoAdvertenciaDeLaUbicacionConSuTexto`). El texto dice solo el hecho: «Tu ubicación es imprecisa.» | `TextoAvisos.gpsImpreciso` |
+| GPS impreciso | Advertencia | **Nadie todavía**: «Mapa y GPS» (EA-25) usa la ubicación, pero no emite este aviso: la imprecisión la dice el servidor en la frase de orientación de cada estación, y la app no tiene un umbral propio de precisión. La clase y su texto existen para quien lo decida con `centro.emitir(.gpsImpreciso, TextoAvisos.gpsImpreciso)` (prueba `testElGpsImpreciosoSeEmiteComoAdvertenciaDeLaUbicacionConSuTexto`). El texto dice solo el hecho: «Tu ubicación es imprecisa.» | `TextoAvisos.gpsImpreciso` |
 
 Los estados de rutina de la sesión (conectando, comprobando el enlace, calibrando, sin detección) no son avisos: siguen diciéndose, pero con prioridad de rutina.
 

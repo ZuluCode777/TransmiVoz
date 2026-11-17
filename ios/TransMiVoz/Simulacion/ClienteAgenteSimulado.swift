@@ -42,6 +42,8 @@ struct ClienteAgenteSimulado: ClienteAgente {
                 catalogo: ProcedenciaCatalogo(procedencia: procedencia, antiguo: antiguo))
         case "gps":
             return RespuestaAgente(texto: "[SIMULADO] Voy a abrir el GPS auditivo.", accion: .gps)
+        case "frecuentes":
+            return RespuestaAgente(texto: "[SIMULADO] Abro tus rutas frecuentes.", accion: .frecuentes)
         case "salgo desde ricaurte":
             // Aclaración entre turnos (EA-19), como el servidor: sin destino pide completarlo y deja el origen pendiente.
             return RespuestaAgente(

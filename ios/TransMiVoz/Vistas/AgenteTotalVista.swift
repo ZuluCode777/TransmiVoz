@@ -1,23 +1,18 @@
 import SwiftUI
 
-/// Inicio del modo «Ceguera total» (web: `components/total-agent.tsx`): la web muestra aquí al asistente de voz a pantalla
-/// completa, sin las baldosas. `InicioVista` lo pone en lugar de las baldosas cuando el modo es `.total`. Ese es el gancho
-/// del Inicio de voz.
+/// Inicio del modo «Ceguera total» (web: `components/total-agent.tsx`): el asistente de voz a pantalla completa, sin las
+/// baldosas. `InicioVista` lo pone en lugar de las baldosas cuando el modo es `.total`.
 ///
-/// PROVISIONAL: pantalla mínima de la base visual. La tarea del Inicio de voz reemplaza este archivo entero; la línea
-/// provisional (`textoProvisional`) no debe llegar a `main`.
+/// Se construye sobre la `ConsultaModelo` de la app (`entorno.consulta`): la misma consulta, dictado y voz que la pestaña
+/// Consulta, sin otro reconocedor ni otro dueño del audio. `inicioVisible` dice si la pestaña Inicio es la elegida en la raíz:
+/// al dejarla se corta la voz de la respuesta que abrió una pantalla (`AgenteTotalModelo.alSalirDeInicio`).
 struct AgenteTotalVista: View {
-    /// Única línea provisional de esta pantalla.
-    static let textoProvisional = "Ceguera total: el Inicio de voz está en construcción."
+    let consulta: ConsultaModelo
+    /// Rutas, favoritas, viaje y «Mapa y GPS»: las pantallas a las que lleva el asistente, con las mismas dependencias que Inicio.
+    let servicios: ServiciosRutas
+    let inicioVisible: Bool
 
     var body: some View {
-        ScrollView {
-            Text(Self.textoProvisional)
-                .font(.jakarta(.bold, .lg))
-                .tarjetaWeb()
-                .accessibilityIdentifier("provisional-agente-total")
-                .padding(16)
-        }
-        .bordeInferiorLegible()
+        AgenteTotalContenido(consulta: consulta, servicios: servicios, inicioVisible: inicioVisible)
     }
 }

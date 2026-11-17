@@ -617,14 +617,19 @@ final class TransMiVozUITests: XCTestCase {
         XCTAssertFalse(elemento("aviso-catalogo-antiguo").exists, "con datos recientes el aviso desaparece")
     }
 
-    func testAccionSinPantallaInformaElLimiteYNoNavega() throws {
+    func testAccionGpsInformaElLimiteOfreceLaPantallaYNoNavegaSola() throws {
         preguntar("gps")
         esperarTexto("[SIMULADO] Voy a abrir el GPS auditivo.")
         let limite = elemento("limite-accion")
         XCTAssertTrue(limite.exists, "falta el límite de la acción")
-        XCTAssertTrue(limite.label.contains("no usa tu ubicación"))
-        XCTAssertTrue(limite.label.contains("desde qué estación sales"), "sin ubicación, el origen se escribe")
-        XCTAssertTrue(app.tabBars.buttons["Consulta"].isSelected, "la app no navega a ninguna pantalla")
+        XCTAssertTrue(limite.label.contains("no abre sola"), "dice que Consulta no navega sola")
+        XCTAssertTrue(limite.label.contains("Solo usa tu ubicación si la activas allí"), "dice cuándo se usa la ubicación")
+        XCTAssertTrue(app.tabBars.buttons["Consulta"].isSelected, "la app no navega sola")
+        let enlace = elemento("enlace-gps")
+        XCTAssertTrue(enlace.waitForExistence(timeout: 5), "falta el botón que abre «Mapa y GPS»")
+        enlace.tap()
+        XCTAssertTrue(app.navigationBars["Mapa y GPS"].waitForExistence(timeout: 10), "el botón no abrió «Mapa y GPS»")
+        XCTAssertTrue(elemento("gps-activar").waitForExistence(timeout: 10), "nada se pide al abrir: la persona activa la ubicación")
     }
 
     // MARK: Servidor
@@ -2100,7 +2105,8 @@ final class TransMiVozRutasUITests: RutasUITestCase {
         abrirRutas()
         buscar("z99")
         XCTAssertTrue(elemento("ruta-Z99").waitForExistence(timeout: 10))
-        try auditar(app, "rutas-resultados", testCase: self)
+        // Con resultados la pantalla mide más que la vista: la auditoría la recorre entera (`auditarPantallaLarga`).
+        try auditarPantallaLarga(app, "rutas-resultados", caso: self)
     }
 
     func testAuditoriaAccesibilidadViajeAntesDePlanear() throws {
@@ -2292,10 +2298,10 @@ final class TransMiVozInicioUITests: XCTestCase {
         XCTAssertTrue(parcial.isSelected, "Baja visión es el modo de partida")
         XCTAssertFalse(total.isSelected)
 
-        // Ceguera total: sin baldosas, con el gancho del Inicio de voz.
+        // Ceguera total: sin baldosas, con el asistente de voz.
         total.tap()
         XCTAssertTrue(total.waitForNonExistence(timeout: 10), "El menú no se cerró al elegir un modo")
-        XCTAssertTrue(elemento("provisional-agente-total").waitForExistence(timeout: 10), "Ceguera total no muestra su Inicio")
+        XCTAssertTrue(elemento("agente-total-microfono").waitForExistence(timeout: 10), "Ceguera total no muestra su Inicio")
         XCTAssertFalse(elemento("inicio-lupa").exists, "Ceguera total no muestra las baldosas")
         XCTAssertTrue(elemento("boton-menu-modo").exists, "la cabecera sigue en Ceguera total")
 

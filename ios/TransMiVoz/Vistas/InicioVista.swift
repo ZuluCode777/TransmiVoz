@@ -9,7 +9,7 @@ enum DestinoInicio: Hashable {
 /// Inicio de la app: lo que la web llama `PartialHome`, con la cabecera y las seis baldosas. Es la primera pestaña y la de
 /// partida. Según el modo (`EntornoApp.modo`), las baldosas de Baja visión o, para Ceguera total, `AgenteTotalVista`.
 ///
-/// Dónde enchufar una pantalla nueva: una pantalla de una baldosa se arma con `EncabezadoPantalla` y se cablea en
+/// Dónde enchufar una pantalla nueva: una pantalla de una baldosa se arma con `EncabezadoPantalla` y `pantallaWeb()` y se cablea en
 /// `pantalla(_:)` de abajo; si no cabe en un destino de esta pila (otra pestaña), se cambia `pestana` como hace el Asistente.
 struct InicioVista: View {
     let entorno: EntornoApp
@@ -21,14 +21,19 @@ struct InicioVista: View {
 
     var body: some View {
         NavigationStack(path: $camino) {
-            contenido
-                // El título solo da nombre al botón «atrás» de las pantallas que se abren desde aquí: la barra muestra
-                // el nombre de la app con su ficha (`EncabezadoApp`).
-                .navigationTitle(TextoInicio.nombreApp)
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar { EncabezadoApp(alAbrirMenu: abrirMenuModo, alAbrirAvisos: { pestana = .avisos }) }
-                .tint(Paleta.foreground)
-                .navigationDestination(for: DestinoInicio.self) { destino in pantalla(destino) }
+            // La cabecera va en una fila fija sobre el contenido, no en la barra de navegación: allí iOS 26 limita cada
+            // control a 36 pt y no escala el texto (ver `EncabezadoApp`).
+            VStack(spacing: 0) {
+                EncabezadoApp(alAbrirMenu: abrirMenuModo, alAbrirAvisos: { pestana = .avisos })
+                contenido
+            }
+            .pantallaWeb()
+            // El título solo da nombre al botón «atrás» de las pantallas que se abren desde aquí: la barra muestra la
+            // ficha del bus y el nombre va en la cabecera, donde escala con Dynamic Type.
+            .navigationTitle(TextoInicio.nombreApp)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .principal) { FichaBusBarra() } }
+            .navigationDestination(for: DestinoInicio.self) { destino in pantalla(destino) }
         }
         // La cámara de la lupa solo está abierta con la pantalla a la vista. `onDisappear` de la lupa ya la suelta al cambiar
         // de pestaña; esto lo repite desde aquí por si el sistema no avisa a una pantalla empujada, y la reabre al volver.
@@ -43,8 +48,8 @@ struct InicioVista: View {
     @ViewBuilder private var contenido: some View {
         switch entorno.modo.modo {
         case .parcial: baldosas
-        // GANCHO del Inicio de voz: la tarea de Ceguera total reemplaza `AgenteTotalVista`.
-        case .total: AgenteTotalVista()
+        case .total:
+            AgenteTotalVista(consulta: entorno.consulta, servicios: entorno.serviciosRutas, inicioVisible: pestana == .inicio)
         }
     }
 
@@ -95,9 +100,9 @@ struct InicioVista: View {
         switch destino {
         case .rutas: RutasVista(servicios: entorno.serviciosRutas)
         case .lupa: LupaVista(modelo: entorno.lupa, avisoSintetico: entorno.modoPruebas)
-        case .gps: GpsAuditivoVista()
-        case .metro: MetroVista()
-        case .emergencia: EmergenciaVista()
+        case .gps: GpsAuditivoVista(servicios: entorno.serviciosRutas)
+        case .metro: MetroVista(servicios: entorno.serviciosRutas)
+        case .emergencia: EmergenciaVista(voz: entorno.avisos.voz)
         }
     }
 }

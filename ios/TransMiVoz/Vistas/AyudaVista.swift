@@ -30,6 +30,7 @@ struct AyudaVista: View {
             }
             .padding(16)
         }
+        .pantallaWeb()
         .navigationTitle("Ayuda")
         .navigationBarTitleDisplayMode(.inline)
         .bordeInferiorLegible()

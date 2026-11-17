@@ -31,6 +31,9 @@ final class PaletaTests: XCTestCase {
             Par(nombre: "brandInk/brandSoft", letra: Paleta.brandInk, fondo: Paleta.brandSoft),
             Par(nombre: "sosForeground/sos", letra: Paleta.sosForeground, fondo: Paleta.sos),
             Par(nombre: "mutedForeground/muted", letra: Paleta.mutedForeground, fondo: Paleta.muted),
+            // El texto secundario (`textoSecundario`) va en `mutedForeground` sobre la pantalla y sobre las tarjetas.
+            Par(nombre: "mutedForeground/background", letra: Paleta.mutedForeground, fondo: Paleta.background),
+            Par(nombre: "mutedForeground/card", letra: Paleta.mutedForeground, fondo: Paleta.card),
             Par(nombre: "ok/background", letra: Paleta.ok, fondo: Paleta.background),
             Par(nombre: "fail/background", letra: Paleta.fail, fondo: Paleta.background),
         ]
@@ -51,6 +54,14 @@ final class PaletaTests: XCTestCase {
             for token in [Paleta.border, Paleta.ring] {
                 XCTAssertGreaterThanOrEqual(contraste(token, Paleta.background, estilo), 3)
             }
+        }
+    }
+
+    /// El texto secundario es un token opaco de la paleta, no `label` con transparencia (la auditoría lo medía mezclado con el
+    /// relleno de las tarjetas).
+    func testElTextoSecundarioEsElTokenOpacoDeLaPaleta() {
+        for estilo in [UIUserInterfaceStyle.light, .dark] {
+            XCTAssertEqual(hex(Color.textoSecundario, estilo), hex(Paleta.mutedForeground, estilo))
         }
     }
 

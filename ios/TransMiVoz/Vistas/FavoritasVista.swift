@@ -1,9 +1,11 @@
 import SwiftUI
 
 /// Rutas favoritas: lista con «Quitar» y un estado vacío que explica cómo se agregan. Agregar se hace desde la
-/// pantalla de rutas (`FavoritasModelo.agregar`).
+/// pantalla de rutas (`FavoritasModelo.agregar`). Tocar una favorita abre el detalle de su ruta, como «Rutas frecuentes»
+/// en la web (`RouteList` ▸ `RouteDetail`); sin los servicios de rutas en el entorno la fila queda como texto.
 struct FavoritasVista: View {
     let modelo: FavoritasModelo
+    @Environment(\.serviciosRutas) private var servicios
 
     /// Tras quitar una ruta desaparece la fila que tenía el foco: va al encabezado de la lista, o al del estado vacío
     /// si era la última (EA-02 §1: el foco nunca queda en la nada). Solo uno de los dos encabezados existe a la vez.
@@ -25,6 +27,8 @@ struct FavoritasVista: View {
             }
             .padding(16)
         }
+        .bordeSuperiorNitido()
+        .pantallaWeb()
         .navigationTitle("Favoritas")
         .navigationBarTitleDisplayMode(.inline)
         .bordeInferiorLegible()
@@ -57,23 +61,40 @@ struct FavoritasVista: View {
             // Siempre en vertical: con texto grande el código y el botón no caben en una fila.
             ForEach(modelo.codigos, id: \.self) { codigo in
                 VStack(alignment: .leading, spacing: 8) {
-                    Text(TextoFavoritas.ruta(codigo))
-                        .font(.title3.bold())
-                        .accessibilityIdentifier("favorita-\(codigo)")
-                    Button(role: .destructive) {
-                        quitar(codigo)
-                    } label: {
-                        Text(TextoFavoritas.quitar).foregroundStyle(Color(uiColor: .systemBackground))
-                    }
-                    .font(.body)
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.large)
-                    .tint(.rojoAccesible)
-                    .frame(minHeight: 44)
-                    .accessibilityLabel(TextoFavoritas.etiquetaQuitar(codigo))
-                    .accessibilityIdentifier("quitar-favorita-\(codigo)")
+                    filaRuta(codigo)
+                    // Estilo propio y a todo el ancho, como los botones de la web: el relleno del sistema dependía del
+                    // color de acento y su área táctil era solo la del texto (87 pt en la corrida en que un toque no quitó nada).
+                    Button(TextoFavoritas.quitar, role: .destructive) { quitar(codigo) }
+                        .buttonStyle(EstiloBotonPeligro())
+                        .accessibilityLabel(TextoFavoritas.etiquetaQuitar(codigo))
+                        .accessibilityIdentifier("quitar-favorita-\(codigo)")
                 }
             }
+        }
+    }
+
+    /// El código de la ruta: un enlace a su detalle si hay servicios de rutas; si no, solo el texto.
+    @ViewBuilder private func filaRuta(_ codigo: String) -> some View {
+        if let servicios {
+            NavigationLink {
+                DetalleRutaVista(servicios: servicios, codigo: codigo)
+            } label: {
+                HStack(spacing: 8) {
+                    Text(TextoFavoritas.ruta(codigo)).font(.title3.bold())
+                    Spacer(minLength: 8)
+                    Image(systemName: "chevron.right").accessibilityHidden(true)
+                }
+                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(EstiloApreton())
+            .accessibilityLabel(TextoFavoritas.ruta(codigo))
+            .accessibilityHint(TextoRutas.pistaDetalle)
+            .accessibilityIdentifier("favorita-\(codigo)")
+        } else {
+            Text(TextoFavoritas.ruta(codigo))
+                .font(.title3.bold())
+                .accessibilityIdentifier("favorita-\(codigo)")
         }
     }
 

@@ -2,27 +2,242 @@ import SwiftUI
 
 /// «Mapa y GPS» (web: `components/auditory-gps.tsx`). Se abre desde la baldosa «Mapa y GPS» de Inicio.
 ///
-/// PROVISIONAL: pantalla mínima de la base visual. La tarea de esta función reemplaza este archivo entero; la línea
-/// provisional (`textoProvisional`) no debe llegar a `main`: la rama de integración se fusiona solo con todas las
-/// pantallas reales. Conserva el título de navegación «Mapa y GPS» (las pruebas de Inicio abren la pantalla por él).
+/// Dice por voz hacia qué estación de TransMilenio orientarse. La ubicación y la brújula las da CoreLocation SOLO «al usar la
+/// app»: la persona la activa y la detiene (nada se pide al abrir la pantalla), se suelta sola al salir de la pantalla o al
+/// bloquear el iPhone, no hay ubicación en segundo plano y no se guarda ni se registra. El servidor ordena las estaciones, mide
+/// la distancia y orienta: aquí no hay ninguna regla de transporte. Cada estación se lee en el listado (el mapa es una ayuda
+/// visual) y la voz es la de `ControlVoz`, la misma de los avisos del accesorio.
+///
+/// El modelo es el de `ServiciosRutas.gps`, uno para toda la app: su voz es la `ControlVoz` compartida y la raíz suelta la ubicación
+/// al cambiar de pestaña o pasar a segundo plano, sea cual sea la pantalla que la abrió.
 struct GpsAuditivoVista: View {
-    /// Única línea provisional de esta pantalla.
-    static let textoProvisional = "Mapa y GPS: pantalla en construcción."
+    let servicios: ServiciosRutas
+
+    @Environment(\.scenePhase) private var faseEscena
+    @Environment(\.openURL) private var abrirURL
+    @AccessibilityFocusState private var foco: ZonaFocoGps?
+
+    /// El modelo compartido de la app. La raíz lo suspende al cambiar de pestaña o ir a segundo plano; esta pantalla también.
+    private var modelo: GpsAuditivoModelo { servicios.gps }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-                EncabezadoPantalla(
-                    titulo: "Mapa y GPS", subtitulo: "Te oriento por voz hacia la estación más cercana", simbolo: "map")
-                Text(Self.textoProvisional)
-                    .font(.jakarta())
-                    .foregroundStyle(Paleta.foreground)
-                    .accessibilityIdentifier("provisional-gps")
+                EncabezadoPantalla(titulo: TextoGps.titulo, subtitulo: TextoGps.subtitulo, simbolo: "map")
+                contenido(modelo)
             }
             .padding(16)
         }
-        .navigationTitle("Mapa y GPS")
+        .pantallaWeb()
+        .navigationTitle(TextoGps.titulo)
         .navigationBarTitleDisplayMode(.inline)
         .bordeInferiorLegible()
+        // La ubicación solo está abierta con la pantalla a la vista y la app en primer plano; no se reanuda sola. `.inactive`
+        // no la suelta: el aviso de permiso del sistema deja la app inactiva un momento, y bloquear el iPhone pasa a
+        // `.background` enseguida.
+        .onDisappear { modelo.suspender() }
+        .onChange(of: faseEscena) { _, nueva in if nueva == .background { modelo.suspender() } }
+        // Con «Repetir» el foco va al resultado aunque su texto sea igual al anterior.
+        .onChange(of: modelo.repeticiones) { _, _ in foco = .resultadoVoz }
+        .onChange(of: modelo.fallo) { _, nuevo in
+            guard let nuevo else { return }
+            AccessibilityNotification.Announcement("\(nuevo.mensaje) \(nuevo.recuperacion)").post()
+            foco = .error
+        }
+    }
+
+    // MARK: Contenido
+
+    @ViewBuilder private func contenido(_ modelo: GpsAuditivoModelo) -> some View {
+        // Antes de activar, primero la explicación de privacidad. Con la ubicación en uso van primero los controles
+        // («Detener», «Repetir indicación», «Actualizar»), a la vista sin desplazar, y la explicación sigue en la pantalla, al final.
+        if !modelo.escuchando { privacidad }
+        controlDeUbicacion(modelo)
+        if modelo.estado == .activo { acciones(modelo) }
+        estadoDeUbicacion(modelo)
+        appDijo(modelo)
+        if modelo.estado == .activo || modelo.estado == .vencida { resultado(modelo) }
+        if modelo.escuchando { privacidad }
+    }
+
+    private var privacidad: some View {
+        Text(TextoGps.privacidad)
+            .tarjetaWeb()
+            .accessibilityIdentifier("gps-privacidad")
+    }
+
+    @ViewBuilder private func controlDeUbicacion(_ modelo: GpsAuditivoModelo) -> some View {
+        if modelo.escuchando {
+            Button(TextoGps.detener) { modelo.detener() }
+                .buttonStyle(EstiloBotonSecundario())
+                .accessibilityIdentifier("gps-detener")
+        } else {
+            Button(TextoGps.activar) { modelo.iniciar() }
+                .buttonStyle(EstiloBotonPrimario())
+                .accessibilityIdentifier("gps-activar")
+        }
+        if modelo.estado == .permisoDenegado {
+            Button(TextoGps.abrirAjustes) {
+                if let url = URL(string: UIApplication.openSettingsURLString) { abrirURL(url) }
+            }
+            .buttonStyle(EstiloBotonSecundario())
+            .accessibilityIdentifier("gps-abrir-ajustes")
+        }
+    }
+
+    /// Lo que se sabe de la ubicación y la brújula, en texto: el estado nunca va solo en un color o un icono.
+    @ViewBuilder private func estadoDeUbicacion(_ modelo: GpsAuditivoModelo) -> some View {
+        if let aviso = modelo.aviso {
+            Text(aviso)
+                .font(.headline)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityAddTraits(.updatesFrequently)
+                .accessibilityIdentifier("gps-estado")
+        }
+        if modelo.estado == .activo {
+            if let precision = modelo.precisionMetros {
+                Text(TextoGps.precision(metros: precision)).accessibilityIdentifier("gps-precision")
+            } else {
+                Text(TextoGps.precisionDesconocida).accessibilityIdentifier("gps-precision")
+            }
+            // La antigüedad junto a la precisión (EA-02 §9). `TimelineView` la vuelve a leer cada segundo mientras se ve: solo lee el
+            // reloj del modelo, sin red, sin sensor y sin otro temporizador. A los 60 s la lectura vence y la fila desaparece.
+            TimelineView(.periodic(from: .now, by: 1)) { _ in
+                if let edad = modelo.edadLecturaMs() {
+                    Text(TextoGps.edad(milisegundos: edad))
+                        .accessibilityAddTraits(.updatesFrequently)
+                        .accessibilityIdentifier("gps-edad")
+                }
+            }
+        }
+        if modelo.escuchando {
+            switch modelo.rumbo {
+            case .noDisponible: Text(TextoGps.rumboNoDisponible).accessibilityIdentifier("gps-rumbo")
+            case .sinLectura: Text(TextoGps.rumboSinLectura).accessibilityIdentifier("gps-rumbo")
+            case .conLectura: EmptyView()
+            }
+        }
+    }
+
+    /// «La app dijo» (EA-02 §5): todo lo que esta pantalla dice por voz, en el mismo texto, con «Repetir» y cómo salió cada intento.
+    /// «Repetir» vuelve a decir la última frase tal cual, sin consulta; «Repetir indicación» (arriba) pide otra al servidor.
+    @ViewBuilder private func appDijo(_ modelo: GpsAuditivoModelo) -> some View {
+        if !modelo.transcripcion.isEmpty {
+            VStack(alignment: .leading, spacing: 8) {
+                Text(TextoGps.appDijo)
+                    .font(.headline)
+                    .accessibilityAddTraits(.isHeader)
+                    .accessibilityIdentifier("gps-app-dijo")
+                ForEach(Array(modelo.transcripcion.enumerated()), id: \.offset) { indice, frase in
+                    Text(frase)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier("gps-app-dijo-\(indice)")
+                }
+                if let resultado = modelo.resultadoVoz {
+                    Text(TextoGps.resultadoVoz(resultado))
+                        .font(.subheadline)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityFocused($foco, equals: .resultadoVoz)
+                        .accessibilityIdentifier("gps-app-dijo-resultado")
+                }
+                Button(TextoGps.repetirLoDicho) { modelo.repetirLoDicho() }
+                    .buttonStyle(EstiloBotonSecundario())
+                    .accessibilityLabel(TextoGps.repetirLoDichoEtiqueta)
+                    .accessibilityIdentifier("gps-repetir-dicho")
+            }
+            .tarjetaWeb()
+        }
+    }
+
+    private func acciones(_ modelo: GpsAuditivoModelo) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Button { modelo.repetirIndicacion() } label: {
+                Label(TextoGps.repetir, systemImage: "speaker.wave.2")
+            }
+            .buttonStyle(EstiloBotonSecundario())
+            .disabled(modelo.consultando)
+            .accessibilityIdentifier("gps-repetir")
+            Button { modelo.actualizar() } label: {
+                Label(TextoGps.actualizar, systemImage: "arrow.clockwise")
+            }
+            .buttonStyle(EstiloBotonSecundario())
+            .disabled(modelo.consultando)
+            .accessibilityIdentifier("gps-actualizar")
+        }
+    }
+
+    @ViewBuilder private func resultado(_ modelo: GpsAuditivoModelo) -> some View {
+        if modelo.consultando {
+            ProgresoWeb(texto: TextoGps.consultando).accessibilityIdentifier("gps-consultando")
+        }
+        if let error = modelo.fallo {
+            VStack(alignment: .leading, spacing: 8) {
+                Label("No se pudieron traer las estaciones", systemImage: "exclamationmark.triangle")
+                    .font(.headline)
+                    .accessibilityAddTraits(.isHeader)
+                    .accessibilityFocused($foco, equals: .error)
+                Text(error.mensaje).accessibilityIdentifier("gps-error")
+                Text(error.recuperacion).foregroundStyle(.textoSecundario)
+                Button("Reintentar") { modelo.actualizar() }
+                    .buttonStyle(EstiloBotonSecundario())
+                    .accessibilityIdentifier("gps-reintentar")
+            }
+        }
+        if let respuesta = modelo.respuesta {
+            MapaGpsVista(
+                usuario: modelo.posicionEnMapa,
+                estaciones: respuesta.estaciones.enumerated().map { indice, estacion in
+                    MapaGpsVista.Marca(
+                        id: indice, titulo: estacion.nombre, coordenada: estacion.coordenada,
+                        elegida: estacion.nombre == modelo.objetivo)
+                },
+                modoPruebas: servicios.modoPruebas)
+            Text(TextoGps.encabezadoEstaciones)
+                .font(.title3.bold())
+                .accessibilityAddTraits(.isHeader)
+            if respuesta.estaciones.isEmpty {
+                Text(TextoGps.sinEstaciones).accessibilityIdentifier("gps-sin-estaciones")
+            } else {
+                ForEach(Array(respuesta.estaciones.enumerated()), id: \.offset) { indice, estacion in
+                    fila(modelo, indice: indice, estacion: estacion)
+                }
+            }
+            if let mapas = modelo.mensajeMapas {
+                Text(mapas).accessibilityIdentifier("gps-mapas-aviso")
+            }
+            CatalogoVista(catalogo: respuesta.catalogo, alVolverAConsultar: { modelo.actualizar() })
+        }
+    }
+
+    private func fila(_ modelo: GpsAuditivoModelo, indice: Int, estacion: EstacionCercana) -> some View {
+        let elegida = estacion.nombre == modelo.objetivo
+        return VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(estacion.nombre).font(.headline)
+                Text(elegida ? "\(TextoGps.filaDistancia(estacion)) · \(TextoGps.orientando)" : TextoGps.filaDistancia(estacion))
+                Text(estacion.orientacion.indicacion).font(.subheadline).foregroundStyle(.textoSecundario)
+            }
+            .accessibilityElement(children: .combine)
+            .accessibilityIdentifier("gps-estacion-\(indice)")
+            // El aviso de cercanía de la web, también en texto: lo decide el servidor (`muyCerca`) y solo para la estación elegida.
+            if elegida && estacion.muyCerca {
+                Text(TextoGps.muyCerca(estacion)).font(.subheadline.bold()).accessibilityIdentifier("gps-muy-cerca-\(indice)")
+            }
+            Button(TextoGps.orientarme) { modelo.orientarHacia(estacion.nombre) }
+                .buttonStyle(EstiloBotonSecundario())
+                .accessibilityIdentifier("gps-orientar-\(indice)")
+            // La ruta a pie en la app Mapas (equivalente a «Abrir en Google Maps»): solo recibe el destino, la estación.
+            Button(TextoGps.abrirEnMapas) { modelo.abrirEnMapas(estacion.nombre) }
+                .buttonStyle(EstiloBotonSecundario())
+                .accessibilityIdentifier("gps-mapas-\(indice)")
+            Text(TextoGps.notaMapas)
+                .font(.footnote)
+                .foregroundStyle(.textoSecundario)
+                .accessibilityIdentifier("gps-nota-mapas-\(indice)")
+        }
+        .tarjetaWeb()
     }
 }
+
+/// Zona de foco de VoiceOver: al fallar una consulta, el foco pasa al error.
+private enum ZonaFocoGps: Hashable { case error, resultadoVoz }
