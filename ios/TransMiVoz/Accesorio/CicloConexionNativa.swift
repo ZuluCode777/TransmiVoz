@@ -23,10 +23,11 @@ import Foundation
 /// pendiente. Si ese aviso no llega, `cerrando` conserva el periférico y toda petición posterior sobre el mismo
 /// accesorio queda esperando: no puede tener éxito hasta apagar y encender el Bluetooth (`reiniciar()`) o
 /// reiniciar la app. No se olvida `cerrando` por tiempo: un aviso rezagado de la conexión vieja se confundiría
-/// con un corte de la nueva. La sesión (`SesionAccesorioModelo`) vigila el plazo de la conexión, pero eso solo
-/// acota lo que la persona ve («el accesorio no respondió a tiempo»); NO recupera este dueño. Por eso el texto
-/// de fallo ofrece, tras repetirse, apagar y encender el Bluetooth o reiniciar la app. Seguro, acotado y sin
-/// probar con hardware (ver ea-15-ios-ble-audio.md, banco de pruebas).
+/// con un corte de la nueva. Para no exponerse a ese límite, la sesión (`SesionAccesorioModelo`) ya no cancela
+/// por tiempo una conexión pendiente ni al volver a primer plano: solo la cancela una orden de la persona (Detener,
+/// Reconectar o elegir otro accesorio). Si aun así ocurre, el texto de fallo ofrece, tras repetirse, apagar y
+/// encender el Bluetooth o reiniciar la app. Seguro, acotado y sin probar con hardware (ver
+/// ea-15-ios-ble-audio.md, banco de pruebas).
 struct CicloConexionNativa {
     enum Orden: Equatable {
         case abrir(id: String)

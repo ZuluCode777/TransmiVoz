@@ -202,6 +202,8 @@ final class TransporteCoreBluetooth: TransporteAccesorio {
 
     fileprivate func conectado(_ p: CBPeripheral) {
         guard ciclo.vale(p.identifier.uuidString) else { return }
+        // Desde aquí la sesión cuenta el plazo del descubrimiento; la conexión pendiente no tenía plazo.
+        avisar(.enlaceAbierto)
         p.discoverServices([servicio])
     }
 

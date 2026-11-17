@@ -292,12 +292,35 @@ final class SesionAccesorioModeloTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(banco.transporte.veces("desconectar"), 1)
     }
 
-    /// El transporte solo emite `.conectado` cuando también terminó de descubrir el servicio y sus dos
-    /// características, así que este plazo cubre la conexión Y el descubrimiento.
-    func testUnaConexionPendienteCaducaPorTiempoYSePuedeReconectar() {
+    /// Core Bluetooth no vence un `connect` pendiente, y cancelarlo puede dejar al mismo accesorio sin poder
+    /// reconectar hasta apagar el Bluetooth (#41, prueba del 13/11): la conexión pedida espera sin plazo y no se cancela.
+    func testUnaConexionPendienteNoVencePorTiempoNiSeCancela() {
         let banco = BancoAccesorio()
         defer { banco.cerrar() }
         banco.iniciar()
+        let token = banco.transporte.tokenVigente
+
+        banco.reloj.avanzar(10 * 60_000)
+        banco.modelo.evaluar()
+        XCTAssertEqual(banco.modelo.estado, .conectando, "a los 10 min sigue esperando, sin fallo")
+        XCTAssertEqual(banco.transporte.veces("desconectar"), 0, "la conexión pendiente no se cancela")
+        XCTAssertEqual(banco.transporte.veces("conectar:acc-1"), 1)
+        XCTAssertFalse(banco.salida.dicho.contains("Fallo del accesorio. Sin avisos."))
+
+        // El accesorio aparece: la misma conexión sigue y la sesión llega a sus medidas.
+        banco.transporte.emitir(.enlaceAbierto)
+        banco.transporte.emitir(.conectado(id: banco.accesorio.id))
+        XCTAssertEqual(banco.transporte.tokenVigente, token)
+        XCTAssertEqual(banco.transporte.veces("leerInformacion"), 1)
+    }
+
+    /// Desde `.enlaceAbierto` el descubrimiento del servicio sí tiene plazo: un enlace que no responde no espera para siempre.
+    func testElDescubrimientoTrasAbrirElEnlaceFallaPorTiempoYSePuedeReconectar() {
+        let banco = BancoAccesorio()
+        defer { banco.cerrar() }
+        banco.iniciar()
+        banco.reloj.avanzar(60_000)  // la espera de la conexión no cuenta para el plazo del descubrimiento
+        banco.transporte.emitir(.enlaceAbierto)
         let viejo = banco.transporte.tokenVigente
 
         banco.reloj.avanzar(SesionAccesorioModelo.plazoPasoMs)
@@ -306,10 +329,10 @@ final class SesionAccesorioModeloTests: XCTestCase {
         banco.reloj.avanzar(1)
         banco.modelo.evaluar()
         XCTAssertEqual(banco.modelo.estado, .falla(.tiempoAgotado))
-        XCTAssertGreaterThanOrEqual(banco.transporte.veces("desconectar"), 1, "se cancela la conexión pendiente")
+        XCTAssertGreaterThanOrEqual(banco.transporte.veces("desconectar"), 1, "se cierra el enlace que no responde")
         XCTAssertEqual(banco.salida.dicho.last, "Fallo del accesorio. Sin avisos.")
 
-        // Una conexión tardía de la que ya se rindió no resucita nada.
+        // Un descubrimiento tardío del que ya se rindió no resucita nada.
         banco.transporte.emitir(.conectado(id: banco.accesorio.id), token: viejo)
         XCTAssertEqual(banco.modelo.estado, .falla(.tiempoAgotado))
         XCTAssertEqual(banco.transporte.veces("leerInformacion"), 0)
@@ -319,7 +342,23 @@ final class SesionAccesorioModeloTests: XCTestCase {
         XCTAssertNotEqual(banco.transporte.tokenVigente, viejo)
         banco.reloj.avanzar(SesionAccesorioModelo.plazoPasoMs + 1)
         banco.modelo.evaluar()
-        XCTAssertEqual(banco.modelo.estado, .falla(.tiempoAgotado), "el plazo vuelve a contar en cada intento")
+        XCTAssertEqual(banco.modelo.estado, .conectando, "el nuevo intento vuelve a esperar sin plazo hasta que haya enlace")
+    }
+
+    /// Un `.enlaceAbierto` fuera de la espera de la conexión no reinicia ningún paso.
+    func testEnlaceAbiertoFueraDeLaConexionSeIgnora() throws {
+        let banco = BancoAccesorio()
+        defer { banco.cerrar() }
+        let escenario = try objetivo()
+        banco.iniciar()
+        banco.sincronizar(escenario)
+        let llamadas = banco.transporte.llamadas
+        banco.transporte.emitir(.enlaceAbierto)
+        XCTAssertEqual(banco.modelo.estado, .sinDeteccion)
+        XCTAssertEqual(banco.transporte.llamadas, llamadas)
+        banco.reloj.avanzar(SesionAccesorioModelo.plazoPasoMs + 1)
+        banco.modelo.evaluar()
+        XCTAssertNotEqual(banco.modelo.estado, .falla(.tiempoAgotado), "sigue suscrita: no empezó ningún plazo de descubrimiento")
     }
 
     func testElPlazoNoCuentaMientrasSeEsperaElPermisoOElBluetooth() {
@@ -365,6 +404,23 @@ final class SesionAccesorioModeloTests: XCTestCase {
         banco.sincronizar(escenario)
         XCTAssertEqual(banco.modelo.estado, .sinDeteccion)
         XCTAssertEqual(Array(banco.salida.dicho.suffix(2)), ["Accesorio conectado. Calibrando. Aún sin avisos.", "Sin detección en este momento."])
+    }
+
+    func testTrasUnCorteLaReconexionEsperaSinPlazo() throws {
+        let banco = BancoAccesorio()
+        defer { banco.cerrar() }
+        let escenario = try objetivo()
+        banco.iniciar()
+        banco.sincronizar(escenario)
+        banco.transporte.emitir(.desconectado)
+        XCTAssertEqual(banco.modelo.estado, .desconectado)
+
+        // El accesorio tarda en volver (reinicio de la placa, persona que se aleja): la reconexión espera sin rendirse.
+        banco.reloj.avanzar(5 * 60_000)
+        banco.modelo.evaluar()
+        XCTAssertEqual(banco.modelo.estado, .desconectado, "sigue intentando, sin pasar a fallo")
+        XCTAssertEqual(banco.transporte.veces("conectar:acc-1"), 2, "la misma conexión pendiente, sin pedir otra")
+        XCTAssertEqual(banco.transporte.veces("desconectar"), 0, "sin cancelarla")
     }
 
     func testElFalloDeConexionNoReintentaSolo() {
@@ -480,6 +536,36 @@ final class SesionAccesorioModeloTests: XCTestCase {
         banco.modelo.escenaActiva(true)
         XCTAssertEqual(banco.transporte.veces("conectar:acc-1"), 2)
         XCTAssertEqual(banco.modelo.estado, .conectando)
+    }
+
+    func testConexionPendienteSeConservaAlVolverAPrimerPlano() {
+        let banco = BancoAccesorio()
+        defer { banco.cerrar() }
+        banco.iniciar()
+        let token = banco.transporte.tokenVigente
+        banco.modelo.escenaActiva(false)
+        banco.reloj.avanzar(60_000)
+        banco.modelo.escenaActiva(true)
+        XCTAssertEqual(banco.transporte.veces("desconectar"), 0, "no se cancela la conexión pendiente")
+        XCTAssertEqual(banco.transporte.veces("conectar:acc-1"), 1)
+        XCTAssertEqual(banco.modelo.estado, .conectando)
+
+        banco.transporte.emitir(.conectado(id: banco.accesorio.id))
+        XCTAssertEqual(banco.transporte.tokenVigente, token)
+        XCTAssertEqual(banco.transporte.veces("leerInformacion"), 1, "la conexión de antes sigue sirviendo")
+    }
+
+    func testConexionPendienteConUnEventoDuranteLaSuspensionSeReiniciaDeCero() {
+        for evento in [EventoTransporte.enlaceAbierto, .conectado(id: "acc-1"), .fallo(.conexionFallida)] {
+            let banco = BancoAccesorio()
+            defer { banco.cerrar() }
+            banco.iniciar()
+            banco.modelo.escenaActiva(false)
+            banco.transporte.emitir(evento)
+            banco.modelo.escenaActiva(true)
+            XCTAssertEqual(banco.transporte.veces("conectar:acc-1"), 2, "\(evento): lo no procesado obliga a empezar de cero")
+            XCTAssertGreaterThanOrEqual(banco.transporte.veces("desconectar"), 1, "\(evento)")
+        }
     }
 
     func testSincronizacionAMediasDuranteLaSuspensionSeReiniciaDeCero() {

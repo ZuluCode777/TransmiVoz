@@ -43,11 +43,14 @@ enum FaseConexion: Equatable {
 ///   `ClasificadorValores`). Es una aclaración propuesta que el responsable del contrato aún no ha
 ///   revisado; no cambia bytes, política por defecto ni frescura. La misma secuencia sirve para
 ///   recalibrar (30 s) y para volver al primer plano. Ver contrato-ble.md §5.1.
-/// - Plazos: la conexión (incluido el descubrimiento de servicio y características, que el transporte
-///   cierra con `.conectado`) y cada paso de la sincronización vencen a los `plazoPasoMs`, contados
-///   con el reloj monotónico inyectado. Vencer falla con «no respondió a tiempo»; no hay espera eterna.
-///   La comprobación del enlace tiene plazo propio (`plazoEmparejamientoMs`): la persona escribe una clave.
-///   Esperar la respuesta del permiso o a que el Bluetooth esté disponible no cuenta como conexión.
+/// - Plazos: la conexión pedida NO vence. Core Bluetooth no vence un `connect` pendiente: se completa cuando
+///   el accesorio aparece (encendido, cerca y sin otro cliente; el firmware acepta uno solo). Cancelarlo por
+///   tiempo obligaba a abrir otra conexión que espera el aviso de cierre de la cancelada (`CicloConexionNativa`)
+///   y, en la prueba del 13/11 (#41), se resolvió solo apagando el Bluetooth. Desde que hay enlace
+///   (`.enlaceAbierto`), el descubrimiento de servicio y características (que el transporte cierra con
+///   `.conectado`) y cada paso de la sincronización vencen a los `plazoPasoMs`, contados con el reloj
+///   monotónico inyectado. Vencer falla con «no respondió a tiempo». La comprobación del enlace tiene plazo
+///   propio (`plazoEmparejamientoMs`): la persona escribe una clave.
 /// - Búsqueda: la INTENCIÓN de buscar (`busquedaPedida`) es de la persona y sobrevive a lo transitorio
 ///   (aviso de permiso del sistema que deja la escena inactiva, Bluetooth apagado); el escaneo real
 ///   (`buscando`) existe solo con la intención, la escena activa y el Bluetooth disponible.
@@ -58,8 +61,9 @@ enum FaseConexion: Equatable {
 @MainActor
 @Observable
 final class SesionAccesorioModelo {
-    /// Una respuesta que tarde más que esto se trata como fallo, no como espera eterna. Vale también
-    /// para conectar y descubrir el servicio. Es una propuesta de software, sin medir (banco de EA-12).
+    /// Una respuesta que tarde más que esto se trata como fallo, no como espera eterna. Vale también para
+    /// descubrir el servicio, contado desde que hay enlace; la conexión pendiente no tiene plazo. Es una
+    /// propuesta de software, sin medir (banco de EA-12).
     static let plazoPasoMs: Milisegundos = 5_000
     /// Plazo de la comprobación del enlace, que puede incluir escribir la clave en la solicitud de iOS. Supera la
     /// gracia de 30 s del firmware (`kGraciaSeguridadMs`) para que sea el accesorio quien corte primero. Propuesta de
@@ -81,7 +85,10 @@ final class SesionAccesorioModelo {
 
     private enum Paso: Equatable {
         case ninguno
+        /// Conexión pedida, sin enlace todavía: espera sin plazo a que el accesorio aparezca.
         case conectando
+        /// Hay enlace y se descubren el servicio y sus características, con `plazoPasoMs`.
+        case descubriendoServicio
         /// Lectura protegida de comprobación en curso; `id` es el accesorio que conectó.
         case comprobandoEnlace(id: String)
         case leyendoInformacion
@@ -130,6 +137,8 @@ final class SesionAccesorioModelo {
     /// Instante (reloj monotónico) en que empezó el «sin datos» por caducidad ordinaria que sigue sin interrupción, o `nil`.
     @ObservationIgnored private var sinDatosDesdeMs: Milisegundos?
     @ObservationIgnored private var temporizador: Task<Void, Never>?
+    /// Llegó un evento de la conexión vigente con la escena suspendida y la sesión no lo procesó.
+    @ObservationIgnored private var eventoEnSuspension = false
     @ObservationIgnored private var escaneando = false
     @ObservationIgnored private var ultimoAvisoEstado: String?
     @ObservationIgnored private var avisadoAudioNoDisponible = false
@@ -317,6 +326,7 @@ final class SesionAccesorioModelo {
         if !enPrimerPlano {
             guard !suspendida else { return }
             suspendida = true
+            eventoEnSuspension = false
             voz.descartarTodo()
             centro.retirar(fuente: .sesion)
             ultimaLocucion = nil
@@ -345,6 +355,9 @@ final class SesionAccesorioModelo {
                 // El latido no corrió con la escena suspendida: el plazo de la comprobación cuenta desde la vuelta,
                 // para no fallar de golpe con la persona aún en la solicitud de iOS.
                 if comprobandoEnlace { inicioPasoMs = reloj() }
+            } else if paso == .conectando && !eventoEnSuspension {
+                // La conexión pedida sigue pendiente y no llegó nada suyo: se sigue esperando, sin cancelarla
+                // (ver «Plazos»). Si hubiera llegado algo, la sesión no lo procesó y se empieza de cero.
             } else {
                 // Sincronización a medias o enlace perdido durante la suspensión: de cero.
                 conexion += 1
@@ -362,8 +375,12 @@ final class SesionAccesorioModelo {
         let ahora = reloj()
         sesion?.evaluar(ahoraMs: ahora)
         switch paso {
-        case .conectando, .leyendoInformacion, .apagandoNotificaciones, .leyendoReferencia, .encendiendoNotificaciones:
+        case .descubriendoServicio, .leyendoInformacion, .apagandoNotificaciones, .leyendoReferencia, .encendiendoNotificaciones:
             if ahora - inicioPasoMs > Self.plazoPasoMs { fallar(.tiempoAgotado) }
+        case .conectando:
+            // Sin plazo: cancelar una conexión pendiente puede dejar al mismo accesorio sin poder reconectar
+            // hasta apagar el Bluetooth (`CicloConexionNativa`, «Límite conocido»).
+            break
         case .comprobandoEnlace:
             if ahora - inicioPasoMs > Self.plazoEmparejamientoMs { fallar(.enlaceSeguroFallido) }
         case .suscrito:
@@ -420,12 +437,17 @@ final class SesionAccesorioModelo {
             // el resultado (superada, fallo o corte) se procesa igual, para no perder un fallo ni quedarse esperando.
             guard comprobandoEnlace else {
                 if case .desconectado = evento { paso = .ninguno }
+                eventoEnSuspension = true
                 return
             }
         }
         switch evento {
-        case .conectado(let id):
+        case .enlaceAbierto:
             guard paso == .conectando else { return }
+            esperar(.descubriendoServicio)
+        case .conectado(let id):
+            // Un transporte que no avisa del enlace abierto (el sintético, los dobles) pasa directo de conectando.
+            guard paso == .conectando || paso == .descubriendoServicio else { return }
             // Todavía no se afirma ningún nivel: primero la lectura protegida de comprobación (puede pedir la clave).
             fase = .conectada
             esperar(.comprobandoEnlace(id: id))
