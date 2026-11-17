@@ -66,6 +66,13 @@ final class SesionAccesorioModelo {
     /// software, sin medir (banco).
     static let plazoEmparejamientoMs: Milisegundos = 35_000
     static let intentosMaximosReferencia = 3
+    /// Gracia de la VOZ ante un «sin datos» por caducidad ordinaria (`sinRecepcion` o `vencido`): el radar SEN0395 entrega una
+    /// observación por segundo y cada una vence a los 500 ms (contrato BLE §7), así que cerca de la mitad de cada segundo el
+    /// estado crudo es «sin datos». Hasta cumplirse esta gracia CONTINUA, medida con el reloj monotónico desde el latido que
+    /// ve el estado vencido, la voz no lo dice ni olvida lo último que dijo. NO cambia la frescura: el estado y la pantalla
+    /// siguen venciendo a los 500 ms. Propuesta de software para la demostración de mesa, sin medir (#41); no es muestreo ni
+    /// latencia de extremo a extremo mejores.
+    static let graciaSinDatosMs: Milisegundos = 2_000
 
     /// Política de demostración del contrato §6 (A1, 12/11/2026, solo para la feria). Fija: no es un ajuste.
     private static func sesionNueva(para accesorio: String) -> SesionProximidad {
@@ -120,6 +127,8 @@ final class SesionAccesorioModelo {
     @ObservationIgnored private var inicioPasoMs: Milisegundos = 0
     @ObservationIgnored private var intentosReferencia = 0
     @ObservationIgnored private var ultimaLocucion: Locucion?
+    /// Instante (reloj monotónico) en que empezó el «sin datos» por caducidad ordinaria que sigue sin interrupción, o `nil`.
+    @ObservationIgnored private var sinDatosDesdeMs: Milisegundos?
     @ObservationIgnored private var temporizador: Task<Void, Never>?
     @ObservationIgnored private var escaneando = false
     @ObservationIgnored private var ultimoAvisoEstado: String?
@@ -283,6 +292,7 @@ final class SesionAccesorioModelo {
         enlaceAutenticado = false
         nivelAfirmado = .desconocido
         ultimaLocucion = nil
+        sinDatosDesdeMs = nil
         ultimoAvisoEstado = nil
         avisadoAudioNoDisponible = false
         olvidarReserva()
@@ -310,6 +320,7 @@ final class SesionAccesorioModelo {
             voz.descartarTodo()
             centro.retirar(fuente: .sesion)
             ultimaLocucion = nil
+            sinDatosDesdeMs = nil
             ultimoAvisoEstado = nil
             temporizador?.cancel()
             temporizador = nil
@@ -394,6 +405,7 @@ final class SesionAccesorioModelo {
                 paso = .ninguno
                 sesion = sesion.map { Self.sesionNueva(para: $0.accesorioElegido) }
                 estadoSesion = .desconectada
+                sinDatosDesdeMs = nil
                 voz.descartarTodo()
             }
             return
@@ -513,6 +525,7 @@ final class SesionAccesorioModelo {
         conexion += 1
         sesion = Self.sesionNueva(para: elegido.id)
         estadoSesion = .desconectada
+        sinDatosDesdeMs = nil
         tramasPerdidas = 0
         enlaceAutenticado = false
         nivelAfirmado = .desconocido
@@ -607,22 +620,46 @@ final class SesionAccesorioModelo {
     /// latido; si el mismo aviso vuelve se dice otra vez (el límite de ritmo sigue valiendo). Un mensaje de rutina no corta ni calla un aviso que todavía suena: no se dice ni gasta nada y el próximo latido
     /// lo reintenta con el estado de entonces. Lo mismo ocurre con un aviso que el límite de ritmo aplazó (`.limitado`).
     ///
+    /// Hueco ordinario de datos (#41): con el radar a 1 Hz y la caducidad a 500 ms, el estado crudo pasa a «sin datos»
+    /// (`sinRecepcion` o `vencido`) y vuelve en cada trama. Mientras ese «sin datos» dura menos de `graciaSinDatosMs`
+    /// seguidos y no se pide repetir, la voz calla («sin datos» no se dice) y NO olvida la última locución: la misma
+    /// presencia o la misma ausencia de detección tras el hueco no reinicia su frase, y un estado distinto sí se dice. La
+    /// lista no deja vigente la proximidad vencida (se cierra sin crear avisos nuevos) y al volver la misma situación se
+    /// marca vigente otra vez, sin voz. Cumplida la gracia, «sin datos» se dice una vez y la recuperación dice el estado de
+    /// ahora. Sin gracia: avería de salud del radar, trama sana sin resultado, pérdida o fallo del accesorio, Bluetooth,
+    /// repetir y recuperar el audio (`reanunciar`).
+    ///
     /// La lista y «Repetir» llevan siempre «Enlace sin autenticar.» en los estados con reserva; la voz de ahora solo mientras
     /// la reserva tenga turno (`reserva`, `maximoReservas`).
     @discardableResult
     private func anunciar(repitiendo: Bool = false) -> Bool {
         guard activa, !suspendida else { return false }
+        let enGracia = huecoOrdinarioEnGracia(reloj())
         let tipo = TipoAviso.de(estado)
         // El estado ya no es un aviso: se cierra el de la sesión y se olvida su locución, para que si el mismo aviso vuelve
         // (el radar parpadea, el enlace cae justo tras reconectar) se emita de nuevo y no se dé por repetido.
         if tipo == nil, centro.retirar(fuente: .sesion) { ultimaLocucion = nil }
-        guard let locucion = TextoAccesorio.locucion(estado), locucion != ultimaLocucion else { return false }
+        guard let locucion = TextoAccesorio.locucion(estado) else { return false }
+        let conReserva = !enlaceAutenticado && TextoAccesorio.lugarDeReserva(estado) != nil
+        let textoConReserva = conReserva ? TextoAccesorio.conReserva(locucion.texto, para: estado) : locucion.texto
+        if locucion == ultimaLocucion {
+            // Ya dicho y vigente, o de vuelta tras un hueco ordinario: no se repite. Si el hueco cerró el aviso en la lista,
+            // vuelve a constar vigente sin hablar (`emitir` no duplica uno vigente).
+            if let tipo {
+                centro.emitir(
+                    tipo, locucion.texto, textoVoz: textoConReserva, enlaceSinAutenticar: conReserva, conVoz: false)
+            }
+            return false
+        }
+        if enGracia && !repitiendo {
+            // Hueco ordinario: el estado crudo ya venció, así que la lista no lo deja vigente, pero nada se dice.
+            centro.retirar(fuente: .sesion)
+            return false
+        }
         if voz.debeCeder(prioridad: tipo?.severidad ?? .rutina) { return false }
         let anterior = ultimaLocucion
         ultimaLocucion = locucion
         if reserva == .enCurso { reserva = voz.ultimaSeOyoEntera ? .oida : .pendiente }
-        let conReserva = !enlaceAutenticado && TextoAccesorio.lugarDeReserva(estado) != nil
-        let textoConReserva = conReserva ? TextoAccesorio.conReserva(locucion.texto, para: estado) : locucion.texto
         let llevaReserva = conReserva && reserva == .pendiente && reservasDichas < Self.maximoReservas
         let dicho = llevaReserva ? textoConReserva : locucion.texto
         let resultado: ResultadoEmision
@@ -648,6 +685,19 @@ final class SesionAccesorioModelo {
             reservasDichas += 1
         }
         return hablado
+    }
+
+    /// Lleva la cuenta del «sin datos» por caducidad ordinaria y dice si sigue dentro de la gracia. Cualquier otro estado
+    /// (trama fresca, avería de salud, trama sana sin resultado, pérdida del accesorio) corta la cuenta: el siguiente hueco
+    /// cuenta desde su propio inicio.
+    private func huecoOrdinarioEnGracia(_ ahora: Milisegundos) -> Bool {
+        guard case .sinDatos(let motivo) = estado, motivo != .sinResultado else {
+            sinDatosDesdeMs = nil
+            return false
+        }
+        let desde = sinDatosDesdeMs ?? ahora
+        sinDatosDesdeMs = desde
+        return ahora - desde < Self.graciaSinDatosMs
     }
 
     private func olvidarReserva() {

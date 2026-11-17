@@ -62,10 +62,12 @@ final class CentroAvisos {
     /// habla ahora si difiere y `textoVoz`, lo que dirá «Repetir» (la sesión les añade la reserva del enlace sin autenticar:
     /// `decir` solo mientras la reserva tenga turno, `textoVoz` siempre). `enlaceSinAutenticar` lo declara la fila.
     /// `distanciaMm`: la medida de una proximidad; una lectura más cercana que la última dicha no la frena el límite de ritmo.
+    /// `conVoz: false` solo lista (o renueva) el aviso, sin hablar ni gastar cupo de voz: la sesión lo usa para volver a marcar
+    /// vigente la misma situación que ya dijo antes de un hueco ordinario de datos.
     @discardableResult
     func emitir(
         _ tipo: TipoAviso, _ texto: String, decir: String? = nil, textoVoz: String? = nil,
-        enlaceSinAutenticar: Bool = false, distanciaMm: Int? = nil, repitiendo: Bool = false
+        enlaceSinAutenticar: Bool = false, distanciaMm: Int? = nil, repitiendo: Bool = false, conVoz: Bool = true
     ) -> ResultadoEmision {
         let ahora = reloj()
         let caduca = tipo.vigenciaMs.map { ahora + $0 }
@@ -75,7 +77,7 @@ final class CentroAvisos {
             // Sigue la misma situación: se renueva la vigencia (si la tiene) y no se repite, salvo que se pida o la voz esté
             // aplazada.
             avisos[i].caducaMs = caduca
-            guard repitiendo || avisos[i].pendienteDeVoz else { return .duplicado }
+            guard conVoz, repitiendo || avisos[i].pendienteDeVoz else { return .duplicado }
             indice = i
         } else {
             retirar(fuente: tipo.fuente)
@@ -87,6 +89,7 @@ final class CentroAvisos {
                 at: 0)
             indice = 0
         }
+        guard conVoz else { return .listado }
         return hablar(en: indice, decir ?? texto, ahora: ahora, forzando: repitiendo, distanciaMm: distanciaMm)
     }
 
