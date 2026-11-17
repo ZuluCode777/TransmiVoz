@@ -145,6 +145,26 @@ final class GpsAuditivoModeloTests: XCTestCase {
         XCTAssertFalse(banco.ubicacion.hayOyente)
     }
 
+    func testRecuperarPermisoTrasUnaConsultaRearmaLaPrimeraPeticionSinArrastrarLaEspera() async throws {
+        for permiso in [PermisoUbicacion.denegado, .restringido, .noDisponible] {
+            let banco = Banco()
+            banco.activar()
+            try await banco.responder(FixturesParidad.cercanasRelativa)
+            banco.ubicacion.emitir(.permiso(permiso))
+            XCTAssertNil(banco.modelo.respuesta)
+
+            // El reloj no avanza: la sesión anterior no debe bloquear la primera consulta de la nueva.
+            banco.activar()
+            await esperarHasta("la primera consulta después de recuperar el permiso") { banco.peticiones == 2 }
+            if banco.peticiones == 2 {
+                try await banco.responder(FixturesParidad.cercanasRelativa)
+                XCTAssertEqual(banco.modelo.estado, .activo)
+                XCTAssertNotNil(banco.modelo.respuesta)
+            }
+            banco.modelo.detener()
+        }
+    }
+
     // MARK: La primera lectura pide una vez; el sensor no pide nada
 
     func testLaPrimeraLecturaVigentePideLasEstacionesUnaSolaVez() async throws {

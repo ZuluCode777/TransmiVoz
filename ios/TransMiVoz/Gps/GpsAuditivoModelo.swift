@@ -257,6 +257,9 @@ final class GpsAuditivoModelo {
         posicionEnMapa = nil
         precisionMetros = nil
         limpiarConsulta()
+        // Recuperar el permiso empieza otra sesión: la primera lectura no hereda la consulta ni la espera anteriores.
+        consultaInicialPendiente = true
+        ultimaPeticionMs = nil
         objetivo = nil
         mensajeMapas = nil
         estado = nuevo
