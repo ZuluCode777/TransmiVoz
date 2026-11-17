@@ -548,6 +548,24 @@ final class ClasificadorContrasteTests: XCTestCase {
         XCTAssertEqual(vista.encaje(de: [CGRect(x: 16, y: 0, width: 100, height: 40), CGRect(x: 16, y: 700, width: 100, height: 40)]), .noCabe(alto: 740))
     }
 
+    /// Marco exacto de la jerarquía nativa del fallo «El teclado no apareció» (run 44017953202, `d2a6472`; vista 180…775): tras
+    /// recorrer el asistente de voz hasta el final, el campo quedó con 29 pt a la vista y el resto bajo la cabecera. `traer`
+    /// lo daba por bueno porque `isHittable` era cierto, y el toque de `escribir` (a un quinto del alto del marco) cayó en la
+    /// cabecera. Con `encaje`, `traer` sigue desplazando hasta que el campo esté entero y el punto del toque dentro de él.
+    func testElCampoDelAsistenteAsomandoBajoLaCabeceraNoEstaEnteroYSuPuntoDeToqueCaeEnLaCabecera() {
+        let vistaDelAsistente = VistaAuditada(arriba: 180, abajo: 775)
+        let campo = CGRect(x: 22, y: 143.3, width: 358, height: 66)
+        func puntoDelToque(_ marco: CGRect) -> CGFloat { marco.minY + marco.height * 0.2 }
+        XCTAssertLessThan(puntoDelToque(campo), vistaDelAsistente.arriba, "el toque caía sobre la cabecera")
+        guard case .desplazar(let d) = vistaDelAsistente.encaje(de: [campo]) else {
+            return XCTFail("Un campo a medias bajo la cabecera no está entero: \(vistaDelAsistente.encaje(de: [campo]))")
+        }
+        XCTAssertLessThan(d, 0, "el campo está encima de la vista: el contenido baja")
+        let despues = moverContenido([campo], d)[0]
+        XCTAssertEqual(vistaDelAsistente.encaje(de: [despues]), .yaEncaja)
+        XCTAssertGreaterThanOrEqual(puntoDelToque(despues), vistaDelAsistente.arriba, "con el campo entero el toque cae dentro de él")
+    }
+
     func testSinMarcosOConMarcosVaciosONoFinitosNoHayConjunto() {
         XCTAssertEqual(vista.encaje(de: []), .marcoInvalido)
         XCTAssertEqual(vista.encaje(de: [CGRect(x: 16, y: 300, width: 0, height: 40)]), .marcoInvalido)
