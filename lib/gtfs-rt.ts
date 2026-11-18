@@ -115,8 +115,12 @@ type Dependencias = {
 type Meta = { ultimoError: string | null; entidades: number; cabecera: number | null }
 
 type Fuente<T> = {
-  /** Espera la lectura (con la copia al día si no venció el TTL). Falla si no hay ni copia. */
-  leer(): Promise<Lectura<T>>
+  /**
+   * Espera la lectura (con la copia al día si no venció el TTL). Falla si no hay ni copia.
+   * Con `presupuestoMs` no espera más que eso: si ya hay una copia y el presupuesto no alcanza
+   * para otra descarga, la usa mientras se renueva aparte.
+   */
+  leer(presupuestoMs?: number): Promise<Lectura<T>>
   /** No espera: devuelve la última copia buena (o `null`) y lanza el refresco si venció. */
   leerSinEsperar(): Lectura<T> | null
   salud(): SaludFeed
@@ -126,15 +130,19 @@ function crearFuente<T>(opciones: {
   feed: FeedId
   ttlMs: number
   timeoutMs: number
+  /** Tras un fallo, no se vuelve a intentar antes de esto: tres consultas seguidas no son tres descargas fallidas. */
+  reintentoMs: number
   maxBytes: number
   decodificar: (mensaje: bindings.transit_realtime.FeedMessage) => { datos: T; cabecera: number; entidades: number }
   deps?: Dependencias
 }): Fuente<T> {
-  const { feed, ttlMs, timeoutMs, maxBytes, decodificar } = opciones
+  const { feed, ttlMs, timeoutMs, reintentoMs, maxBytes, decodificar } = opciones
   const fetchFn = opciones.deps?.fetchFn ?? fetch
   const ahora = opciones.deps?.ahora ?? Date.now
   let copia: Lectura<T> | null = null
   let enCurso: Promise<void> | null = null
+  /** Instante (según `ahora`) desde el que se permite otro intento tras un fallo. */
+  let proximoIntento = 0
   const meta: Meta = { ultimoError: null, entidades: 0, cabecera: null }
 
   async function descargar(): Promise<void> {
@@ -153,11 +161,13 @@ function crearFuente<T>(opciones: {
       const { datos, cabecera, entidades } = decodificar(rt.FeedMessage.decode(bytes))
       copia = { datos, leidoEn: ahora(), obsoleto: false }
       meta.ultimoError = null
+      proximoIntento = 0
       meta.entidades = entidades
       meta.cabecera = cabecera
     } catch (error) {
       // Solo el nombre del error: el de `fetch` trae la dirección en `cause`.
       meta.ultimoError = error instanceof Error ? (error.name === "Error" ? error.message : error.name) : "fallo"
+      proximoIntento = ahora() + reintentoMs
       if (copia) copia = { ...copia, obsoleto: true }
     }
   }
@@ -165,15 +175,23 @@ function crearFuente<T>(opciones: {
   /** Una sola lectura a la vez por feed. */
   const iniciar = (): Promise<void> => (enCurso ??= descargar().finally(() => (enCurso = null)))
   const vigente = () => copia !== null && ahora() - copia.leidoEn < ttlMs
+  const puedeIntentar = () => enCurso !== null || ahora() >= proximoIntento
 
   return {
-    async leer() {
-      if (!vigente()) await iniciar()
+    async leer(presupuestoMs) {
+      if (!vigente() && puedeIntentar()) {
+        const descarga = iniciar()
+        if (presupuestoMs === undefined) await descarga
+        else if (!(copia && presupuestoMs < timeoutMs)) {
+          let reloj: ReturnType<typeof setTimeout> | undefined
+          await Promise.race([descarga, new Promise((ok) => (reloj = setTimeout(ok, Math.max(0, presupuestoMs)))).finally(() => clearTimeout(reloj))])
+        }
+      }
       if (!copia) throw new Error(`feed ${feed}: ${meta.ultimoError ?? "sin datos"}`)
       return copia
     },
     leerSinEsperar() {
-      if (!vigente()) void iniciar()
+      if (!vigente() && puedeIntentar()) void iniciar()
       return copia
     },
     salud() {
@@ -298,12 +316,15 @@ export const TTL_RETRASOS_MS = 60_000
  * en paralelo (ver `app/api/agent/route.ts`): 3,5 s dejan margen para estimar.
  */
 export const ESPERA_FEED_MS = 3_500
+/** Espera tras una lectura fallida antes de volver a intentar (positions y alerts; tripupdates, más larga por su peso). */
+export const REINTENTO_FEED_MS = 5_000
+export const REINTENTO_RETRASOS_MS = 30_000
 
 export function crearFuentes(deps?: Dependencias) {
   return {
-    posiciones: crearFuente<Posiciones>({ feed: "positions", ttlMs: TTL_POSICIONES_MS, timeoutMs: ESPERA_FEED_MS, maxBytes: 4_000_000, decodificar: decodificarPosiciones, deps }),
-    alertas: crearFuente<Alertas>({ feed: "alerts", ttlMs: TTL_POSICIONES_MS, timeoutMs: ESPERA_FEED_MS, maxBytes: 2_000_000, decodificar: decodificarAlertas, deps }),
-    retrasos: crearFuente<Retrasos>({ feed: "tripupdates", ttlMs: TTL_RETRASOS_MS, timeoutMs: 30_000, maxBytes: 40_000_000, decodificar: decodificarRetrasos, deps }),
+    posiciones: crearFuente<Posiciones>({ feed: "positions", ttlMs: TTL_POSICIONES_MS, timeoutMs: ESPERA_FEED_MS, reintentoMs: REINTENTO_FEED_MS, maxBytes: 4_000_000, decodificar: decodificarPosiciones, deps }),
+    alertas: crearFuente<Alertas>({ feed: "alerts", ttlMs: TTL_POSICIONES_MS, timeoutMs: ESPERA_FEED_MS, reintentoMs: REINTENTO_FEED_MS, maxBytes: 2_000_000, decodificar: decodificarAlertas, deps }),
+    retrasos: crearFuente<Retrasos>({ feed: "tripupdates", ttlMs: TTL_RETRASOS_MS, timeoutMs: 30_000, reintentoMs: REINTENTO_RETRASOS_MS, maxBytes: 40_000_000, decodificar: decodificarRetrasos, deps }),
   }
 }
 

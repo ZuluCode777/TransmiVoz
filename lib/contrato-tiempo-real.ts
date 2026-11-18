@@ -80,6 +80,17 @@ export const BusEnViaSchema = z.object({
   retraso: z.number().nullable(),
 })
 
+/** Estado de un feed concreto, para que cada fuente diga si es fiable por su cuenta. */
+export const EstadoFeedSchema = z.object({
+  /** Segundos desde la hora de la cabecera del feed. */
+  edadS: z.number().nullable(),
+  /** Cabecera con más de 300 s: esa fuente dejó de actualizar. */
+  detenido: z.boolean(),
+  /** Se sirve una copia anterior porque la última lectura falló. */
+  copiaObsoleta: z.boolean(),
+})
+export type EstadoFeed = z.infer<typeof EstadoFeedSchema>
+
 export const MetaSchema = z.object({
   /** Segundos desde la hora que dice la cabecera de `positions.pb`; `null` si no hay lectura. */
   edadDatosS: z.number().nullable(),
@@ -87,10 +98,15 @@ export const MetaSchema = z.object({
   detenido: z.boolean(),
   /** Se sirve una copia anterior porque la última lectura falló. */
   copiaObsoleta: z.boolean(),
-  /** ¿Hay datos de retraso (`tripupdates`) en esta respuesta? */
-  retrasos: z.enum(["disponibles", "sin-datos"]),
+  /**
+   * Retrasos y cancelados (`tripupdates`): `disponibles`, `sin-datos` (aún no hay copia) o
+   * `detenido` (su cabecera tiene más de 300 s: no se usan ni para corregir ni para cancelar).
+   */
+  retrasos: z.enum(["disponibles", "sin-datos", "detenido"]),
   /** Fecha de publicación del GTFS estático del que salen nombres y recorridos. */
   indicePublicado: z.string(),
+  /** Estado de cada feed que esta respuesta leyó (`null`: no se leyó o no hay copia). */
+  feeds: z.object({ posiciones: EstadoFeedSchema.nullable(), alertas: EstadoFeedSchema.nullable(), retrasos: EstadoFeedSchema.nullable() }),
 })
 export type Meta = z.infer<typeof MetaSchema>
 

@@ -4,7 +4,15 @@ import { useEffect, useRef, useState } from "react"
 import { Radio, Volume2 } from "lucide-react"
 import { useSpeech } from "@/hooks/use-speech"
 import { useTiempoReal } from "@/hooks/use-tiempo-real"
-import { RespuestaBusesRutaSchema, RespuestaLlegadasSchema, RespuestaParadasCercanasSchema, type Meta } from "@/lib/contrato-tiempo-real"
+import {
+  RespuestaBusesRutaSchema,
+  RespuestaLlegadasSchema,
+  RespuestaParadasCercanasSchema,
+  type Meta,
+  type RespuestaBusesRuta,
+  type RespuestaLlegadas,
+  type RespuestaParadasCercanas,
+} from "@/lib/contrato-tiempo-real"
 import { spokenDistance } from "@/lib/geo"
 import { enTiempo, haceTiempo, plural, textoDestino, textoRetraso } from "@/lib/texto-tiempo-real"
 
@@ -29,7 +37,12 @@ export function useAnuncioEspaciado(texto: string): string {
   const [anuncio, setAnuncio] = useState("")
   const ultimo = useRef(0)
   useEffect(() => {
-    if (!texto || texto === anuncio) return
+    // Sin texto (consulta nueva, error): se borra lo anunciado, para que no quede un dato viejo en la región viva.
+    if (!texto) {
+      if (anuncio) setAnuncio("")
+      return
+    }
+    if (texto === anuncio) return
     const espera = Math.max(0, ultimo.current + ANUNCIO_MINIMO_MS - Date.now())
     const id = setTimeout(() => {
       ultimo.current = Date.now()
@@ -40,14 +53,56 @@ export function useAnuncioEspaciado(texto: string): string {
   return anuncio
 }
 
-/** Estado de los datos, en texto: edad, fuente detenida y copia anterior. */
-export function textoEstado(meta: Meta | null, desactualizado: boolean): string {
+/** Estado de los datos, en texto: edad, fuente detenida, copia anterior y retrasos sin actualizar. */
+export function textoEstado(meta: Meta | null): string {
   if (!meta) return ""
   const partes: string[] = []
   if (meta.detenido) partes.push("Los datos en vivo no se están actualizando")
   else if (meta.edadDatosS !== null) partes.push(`Datos de ${haceTiempo(meta.edadDatosS)}`)
-  if (meta.copiaObsoleta || desactualizado) partes.push("no pude actualizar; muestro la última copia")
+  if (meta.copiaObsoleta) partes.push("no pude actualizar; muestro la última copia")
+  if (meta.retrasos === "detenido") partes.push("los retrasos y cancelaciones no se actualizan y no los incluyo")
   return partes.join("; ")
+}
+
+const cola = (meta: Meta) => {
+  const estado = textoEstado(meta)
+  return estado ? ` ${estado}.` : ""
+}
+
+/**
+ * Lo que dice el botón «Escuchar» y la región viva. Sale de los MISMOS datos que la lista —origen
+ * (en vivo o programada), motivo y estado del feed—, para que nunca diga más (ni menos) que la
+ * pantalla: una llegada solo programada no se anuncia como bus en vivo, y un feed detenido no se
+ * anuncia como «no hay buses».
+ */
+export function resumenLlegadas(parada: string, ruta: string, d: RespuestaLlegadas): string {
+  if (d.motivo === "feed-detenido") return `No estimo llegadas a ${parada}.${cola(d.meta)}`
+  if (d.motivo === "ruta-no-pasa-por-parada") return `No encuentro ${d.parada} en el recorrido de la ${ruta} que tengo; puede que no pare ahí.`
+  const [l] = d.llegadas
+  if (!l) return `No veo buses de la ${ruta} que lleguen a ${parada} ahora.${cola(d.meta)}`
+  const servicio = `la ${ruta} ${textoDestino(l.destino)}`
+  const frase =
+    l.origen === "en-vivo"
+      ? `${servicio} llega a ${parada} ${enTiempo(l.segundos)}, estimado${textoRetraso(l.retraso)}`
+      : `Según la programación, ${servicio} llegaría a ${parada} ${enTiempo(l.segundos)}, estimado${textoRetraso(l.retraso)}, sin bus en vivo confirmado`
+  return `${l.origen === "en-vivo" ? frase.charAt(0).toUpperCase() + frase.slice(1) : frase}.${cola(d.meta)}`
+}
+
+export function resumenBuses(ruta: string, d: RespuestaBusesRuta): string {
+  if (d.meta.detenido) return `No puedo decir cuántos buses de la ${ruta} hay.${cola(d.meta)}`
+  if (d.buses.length === 0) return `No veo buses de la ${ruta} en vía ahora.${cola(d.meta)}`
+  const sentido = d.destinos.length === 1 ? ` ${textoDestino(d.destinos[0])}` : ""
+  return `${plural(d.buses.length, "bus", "buses")} de la ${ruta} en vía${sentido}.${cola(d.meta)}`
+}
+
+export function resumenParadas(d: RespuestaParadasCercanas): string {
+  if (d.paradas.length === 0) return `No encuentro paradas a menos de 800 metros.${cola(d.meta)}`
+  const frase = (p: (typeof d.paradas)[number]) => {
+    const [l] = p.llegadas ?? []
+    return `${p.nombre}, a ${spokenDistance(p.distancia)}${l ? `: la ${l.codigo} ${textoDestino(l.destino)} ${enTiempo(l.segundos)}, estimado` : ""}`
+  }
+  const sinLlegadas = d.meta.detenido ? " No estimo llegadas." : ""
+  return `Cerca de ti: ${d.paradas.map(frase).join(". ")}.${sinLlegadas}${cola(d.meta)}`
 }
 
 function Encabezado({ titulo, resumen }: { titulo: string; resumen: string }) {
@@ -80,12 +135,7 @@ const nota = "text-base text-muted-foreground"
 export function LlegadasEnVivo({ parada, ruta }: { parada: string; ruta: string }) {
   const r = useTiempoReal({ operacion: "llegadas", parada, ruta, max: 4 }, RespuestaLlegadasSchema)
   const llegadas = r.datos?.llegadas ?? []
-  const resumen =
-    r.datos === null
-      ? ""
-      : llegadas.length === 0
-        ? `No veo buses de la ${ruta} que lleguen a ${parada} ahora.`
-        : `La ${ruta} ${textoDestino(llegadas[0].destino)} llega a ${parada} ${enTiempo(llegadas[0].segundos)}, estimado${textoRetraso(llegadas[0].retraso)}.`
+  const resumen = r.datos === null ? "" : resumenLlegadas(parada, ruta, r.datos)
   const anuncio = useAnuncioEspaciado(resumen)
   return (
     <section aria-label={`Llegadas en vivo de la ${ruta} a ${parada}`} className={caja}>
@@ -112,7 +162,7 @@ export function LlegadasEnVivo({ parada, ruta }: { parada: string; ruta: string 
         </ul>
       )}
       {r.datos && r.datos.motivo === "sin-buses" && <p className="rounded-2xl border-3 border-border bg-card p-4 text-lg">No veo buses de la {ruta} que lleguen a {parada} ahora.</p>}
-      <p className={nota}>{r.datos ? textoEstado(r.datos.meta, r.desactualizado) : ""}</p>
+      <p className={nota}>{r.datos ? textoEstado(r.datos.meta) : ""}</p>
     </section>
   )
 }
@@ -121,8 +171,7 @@ export function LlegadasEnVivo({ parada, ruta }: { parada: string; ruta: string 
 export function BusesEnVivo({ ruta }: { ruta: string }) {
   const r = useTiempoReal({ operacion: "buses-ruta", ruta }, RespuestaBusesRutaSchema)
   const buses = r.datos?.buses ?? []
-  const sentido = r.datos && r.datos.destinos.length === 1 ? ` ${textoDestino(r.datos.destinos[0])}` : ""
-  const resumen = r.datos === null ? "" : buses.length === 0 ? `No veo buses de la ${ruta} en vía ahora.` : `${plural(buses.length, "bus", "buses")} de la ${ruta} en vía${sentido}.`
+  const resumen = r.datos === null ? "" : resumenBuses(ruta, r.datos)
   const anuncio = useAnuncioEspaciado(resumen)
   return (
     <section aria-label={`Buses en vivo de la ${ruta}`} className={caja}>
@@ -146,7 +195,6 @@ export function BusesEnVivo({ ruta }: { ruta: string }) {
         </ul>
       )}
       {buses.length > 5 && <p className={nota}>Y {buses.length - 5} más.</p>}
-      <p className={nota}>{r.datos ? textoEstado(r.datos.meta, r.desactualizado) : ""}</p>
     </section>
   )
 }
@@ -155,11 +203,7 @@ export function BusesEnVivo({ ruta }: { ruta: string }) {
 export function ParadasCercanasEnVivo({ lat, lng }: { lat: number; lng: number }) {
   const r = useTiempoReal({ operacion: "paradas-cercanas", lat, lng, radio: 800, max: 3, conLlegadas: true }, RespuestaParadasCercanasSchema, { cadaMs: 30_000 })
   const paradas = r.datos?.paradas ?? []
-  const frase = (p: (typeof paradas)[number]) => {
-    const [l] = p.llegadas ?? []
-    return `${p.nombre}, a ${spokenDistance(p.distancia)}${l ? `: la ${l.codigo} ${textoDestino(l.destino)} ${enTiempo(l.segundos)}, estimado` : ""}`
-  }
-  const resumen = r.datos === null ? "" : paradas.length === 0 ? "No encuentro paradas a menos de 800 metros." : `Cerca de ti: ${paradas.map(frase).join(". ")}.`
+  const resumen = r.datos === null ? "" : resumenParadas(r.datos)
   const anuncio = useAnuncioEspaciado(resumen)
   return (
     <section aria-label="Paradas cercanas con llegadas en vivo" className={caja}>
@@ -192,7 +236,7 @@ export function ParadasCercanasEnVivo({ lat, lng }: { lat: number; lng: number }
           </li>
         ))}
       </ul>
-      <p className={nota}>{r.datos ? textoEstado(r.datos.meta, r.desactualizado) : ""}</p>
+      <p className={nota}>{r.datos ? textoEstado(r.datos.meta) : ""}</p>
     </section>
   )
 }

@@ -222,6 +222,11 @@ const PARADAS_CON_BUSES_CERCA = ["que buses pasan cerca", "buses pasan cerca", "
 const BUSES_CERCA = ["buses cerca", "bus cerca", "buses cercanos", "bus cercano", "buses alrededor", "donde hay buses"]
 /** Etiqueta de un bus: `Z32-7046`, `D0159`, `T10111`. */
 const ETIQUETA_BUS = /(?:^|[^a-z0-9])([a-z]{1,2}\d{2}-\d{3,5}|[a-z]\d{4,5})(?![a-z0-9])/i
+/** Identificador numérico de un bus (`vehicle.id`): «el bus 10035». Los de ruta son de 1 a 3 cifras, no chocan. */
+const BUS_NUMERICO = /\b(?:bus|buses|vehiculo|articulado|biarticulado)\s+(?:numero\s+)?(\d{4,6})\b/
+/** Lo que sigue a «por», «en», «a», «hasta» o «para» al final de la frase: la parada o estación nombrada. */
+const PARADA_ESCRITA = /\b(?:por|en|a|hasta|para)\s+(?:la\s+|el\s+)?(?:parada\s+|estacion\s+)?([a-z0-9][a-z0-9 ]*)$/
+const NO_ES_PARADA = /^(?:ruta|rutas|bus|buses|servicio|via|circulacion|la|el|mi|aqui|alli|ahi|casa|estacion|parada|bogota|el dia|este momento|ahora|hoy)\b/
 const RUTA_ESCRITA = /\b(?:ruta|bus|buses|servicio)\s+([a-z]{0,2}\d{1,3}[a-z]{0,2}(?:-\d{1,2}[a-z]?)?)(?![a-z0-9-])/i
 const SCHEDULE = ["horario", "horarios", "a que hora", "hora", "abre", "cierra", "opera", "funciona"]
 const FREQUENT = ["frecuente", "frecuentes", "de siempre", "favorita", "favoritas", "guardadas"]
@@ -308,16 +313,28 @@ function rutaDeFrase(text: string, data: TransmilenioData): string | undefined {
 }
 
 /**
+ * Parada o estación que dijo la persona y el catálogo (solo troncal) no tiene: una parada zonal como
+ * «Br. La Liberia». Se conserva tal cual dicha y la valida el servidor contra todo el GTFS: aquí no se
+ * decide si existe. Nada si lo que sigue a la preposición es una ruta, un bus o una palabra suelta.
+ */
+function paradaEscrita(t: string, ruta: string | undefined): string | undefined {
+  const dicha = PARADA_ESCRITA.exec(t)?.[1]?.trim()
+  if (!dicha || NO_ES_PARADA.test(dicha)) return undefined
+  if (ruta && dicha.replace(/ /g, "") === normalize(ruta).replace(/ /g, "")) return undefined
+  return dicha
+}
+
+/**
  * Pregunta en vivo (cuándo llega, dónde viene, novedades, buses cerca…), o `null`
  * si la frase no lo es. Misma lectura para las reglas y para el modelo, que solo
  * aporta la ruta y la estación (`consultaTiempoRealDeModelo`).
  */
 export function interpretarTiempoReal(text: string, data: TransmilenioData): ConsultaTiempoReal | null {
   const t = normalize(text)
-  const etiqueta = ETIQUETA_BUS.exec(text)?.[1]
+  const etiqueta = ETIQUETA_BUS.exec(text)?.[1] ?? BUS_NUMERICO.exec(t)?.[1]
   if (etiqueta) return { tema: "bus", bus: etiqueta.toUpperCase() }
   const ruta = rutaDeFrase(text, data)
-  const parada = findPlaces(text, data)[0]?.name
+  const parada = findPlaces(text, data)[0]?.name ?? paradaEscrita(t, ruta)
   if (hasPhrase(t, CANCELADOS)) return { tema: "cancelados", ruta }
   if (hasPhrase(t, NOVEDADES)) return { tema: "novedades", ruta, parada }
   if (hasPhrase(t, ESTADO_DATOS)) return { tema: "estado_datos" }

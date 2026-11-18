@@ -214,3 +214,78 @@ test("texto de alertas: un código interno no se lee; un título sí, con su efe
   assert.equal(textoAlerta("PMTTP66CL1IDA", "DETOUR"), "un desvío")
   assert.equal(textoAlerta("GIRO PROHIBIDO/CLL73 X CRA.11/S-2", "DETOUR"), "desvío: Giro prohibido, cll73 x cra.11, s-2")
 })
+
+// ── Revisión R1 ──
+
+import { resolverParada } from "@/lib/consulta-tiempo-real"
+import { indiceGtfs } from "@/lib/instantanea-servidor"
+import { instantaneaDeMuestra } from "@/lib/fixtures-gtfs/cargar"
+
+const contextoReal = () => ({ data, i: { ...instantaneaDeMuestra(), indice: indiceGtfs() } })
+
+test("R1·2 «Br. El Virrey» es esa parada (exacta en el GTFS), no la estación «Virrey» a 20 km", () => {
+  const r = resolverParada("Br. El Virrey", contextoReal())
+  assert.equal(r.tipo, "ok")
+  if (r.tipo !== "ok") return
+  assert.equal(r.parada.nombre, "Br. El Virrey")
+  assert.ok(r.parada.ids.has("53369"))
+  assert.ok(!r.parada.ids.has("2302"), "antes resolvía a la estación Virrey - Cendiatra")
+  // Lo catalogado por su nombre exacto sigue yendo a la estación troncal.
+  const calle100 = resolverParada("Calle 100", contextoReal())
+  assert.equal(calle100.tipo === "ok" && calle100.parada.ids.has("2300"), true)
+})
+
+test("R1·2 el nombre EXACTO gana a la búsqueda aproximada, que habría dado varios nombres", () => {
+  const ctx = contextoReal()
+  // «Br. Ciudad Bachué» también es prefijo de «… I Etapa» y «… II Etapa»: aproximada es ambigua, exacta no.
+  const exacta = resolverParada("Ciudad Bachué", ctx)
+  assert.equal(exacta.tipo, "ok")
+  assert.equal(exacta.tipo === "ok" && exacta.parada.nombre, "Ciudad Bachué")
+  assert.equal(resolverParada("Ciudad Bachue I Etapa", ctx).tipo, "ok")
+})
+
+test("R1·2 un nombre con varias zonas o varios nombres parecidos se pregunta, no se adivina", async () => {
+  const ctx = contextoReal()
+  const enDosZonas = resolverParada("Pq. El Virrey", ctx)
+  assert.equal(enDosZonas.tipo, "ambigua", "hay un «Pq. El Virrey» en Usme y otro en Chapinero")
+  const parecidos = resolverParada("Plazuelas", ctx)
+  assert.equal(parecidos.tipo, "ambigua")
+  assert.ok(parecidos.tipo === "ambigua" && parecidos.opciones.length >= 2)
+  assert.equal(resolverParada("Narnia", ctx).tipo, "desconocida")
+  const entorno = instalarFeeds()
+  const reply = await responderTiempoReal({ tema: "novedades", parada: "Plazuelas" }, { data, context: { now: entorno.ahora() } })
+  assert.match(reply.reply, /^Encontré varias paradas que se parecen a Plazuelas: .+\. ¿Cuál quieres\? Dime el nombre completo\.$/)
+})
+
+test("R1·10 el parser conserva la parada zonal y el id numérico del bus; el servidor los valida contra todo el GTFS", async () => {
+  assert.deepEqual(consulta("¿cuándo pasa la ruta CB144 por Br. La Liberia?"), { tema: "llegadas", ruta: "CB144", parada: "br la liberia" })
+  assert.deepEqual(consulta("¿hay novedades en Br. La Liberia?"), { tema: "novedades", ruta: undefined, parada: "br la liberia" })
+  assert.deepEqual(consulta("¿por dónde va el bus 14163?"), { tema: "bus", bus: "14163" })
+  assert.deepEqual(consulta("¿hay novedades en el B10?"), { tema: "novedades", ruta: "B10", parada: undefined }, "una ruta no se toma por parada")
+  assert.deepEqual(consulta("¿hay novedades en la 8 G?"), { tema: "novedades", ruta: "8 G", parada: undefined })
+  const entorno = instalarFeeds()
+  const zonal = await preguntar("¿cuándo pasa la ruta CB144 por Br. La Liberia?", entorno)
+  assert.match(zonal.reply, /Br\. La Liberia/)
+  assert.doesNotMatch(zonal.reply, /No encontré la parada/)
+  assert.match((await preguntar("¿por dónde va el bus 14163?", entorno)).reply, /^El bus N0163 va en la ruta B10 hacia Portal Norte\./)
+  assert.match((await preguntar("¿hay novedades en Br. La Liberia?", entorno)).reply, /No hay novedades vigentes en la estación Br\. La Liberia/)
+})
+
+test("R1·11 llegadas a una estación sin decir la ruta: se listan los servicios, agrupados por ruta y sentido", async () => {
+  assert.deepEqual(consulta("¿cuándo pasa un bus por Calle 100?"), { tema: "llegadas", parada: "Calle 100" })
+  const r = await preguntar("¿cuándo pasa un bus por Calle 100?", instalarFeeds())
+  assert.doesNotMatch(r.reply, /Dime de qué ruta/, "antes exigía la ruta")
+  assert.match(r.reply, /^En Calle 100, tiempos estimados: .*B10 hacia Portal Norte llega a Calle 100 en/)
+  assert.match(r.reply, /Son tiempos estimados y pueden variar\. .*Datos de hace/)
+})
+
+test("R1·6 con tripupdates detenido las respuestas lo dicen y no usan sus retrasos ni cancelaciones", async () => {
+  const entorno = instalarFeeds()
+  entorno.estado.retrasosAtrasados = 400
+  await preguntar("¿Cuándo pasa el B10 por Calle 100?", entorno) // arranca la lectura de tripupdates
+  await new Promise((ok) => setTimeout(ok, 50))
+  const llegadas = await preguntar("¿Cuándo pasa el B10 por Calle 100?", entorno)
+  assert.match(llegadas.reply, /Los retrasos y cancelaciones no se actualizan hace 7 minutos; no los incluyo\./)
+  assert.doesNotMatch(llegadas.reply, /según la programación/, "un feed detenido no añade salidas programadas")
+  assert.match((await preguntar("¿cuántos viajes cancelados hay hoy?", entorno)).reply, /^La lista de viajes cancelados no se actualiza hace 7 minutos, así que no puedo decir cuántos hay hoy\.$/)
+})

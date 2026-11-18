@@ -102,10 +102,24 @@ export function proyectar(patron: PuntoPatron[], lat: number, lng: number): Ubic
 
 // --- Buses frescos -----------------------------------------------------------
 
-/** Buses cuyo propio reporte tiene menos de `VEHICULO_VIEJO_S`; ninguno si el feed está detenido. */
+/**
+ * Copia de `tripupdates` que se puede usar: la que hay, si su cabecera no tiene más
+ * de `FEED_DETENIDO_S`. Un feed detenido no corrige llegadas ni cancela viajes.
+ */
+export function retrasosUsables(i: Instantanea): Retrasos | undefined {
+  const datos = i.retrasos?.datos
+  return datos && !cabeceraVieja(datos.cabecera, i.ahora) ? datos : undefined
+}
+
+/**
+ * Buses cuyo propio reporte tiene menos de `VEHICULO_VIEJO_S`, sin los de un viaje
+ * cancelado; ninguno si el feed está detenido. Es el ÚNICO lugar donde se excluyen:
+ * llegadas, buses en vía, próximas paradas, cercanía y estado del sistema parten de aquí.
+ */
 export function busesVigentes(i: Instantanea): Vehiculo[] {
   if (!i.posiciones || cabeceraVieja(i.posiciones.datos.cabecera, i.ahora)) return []
-  return i.posiciones.datos.vehiculos.filter((v) => ahoraS(i) - v.ts <= VEHICULO_VIEJO_S)
+  const retrasos = retrasosUsables(i)
+  return i.posiciones.datos.vehiculos.filter((v) => ahoraS(i) - v.ts <= VEHICULO_VIEJO_S && !viajeCancelado(retrasos, v))
 }
 
 export function rutaDeIndice(indice: IndiceGtfs, rutaId: string): RutaIndice | undefined {
@@ -215,33 +229,38 @@ export function llegadasEnParada(i: Instantanea, { paradas, rutas, max = 6 }: Op
   const { indice } = i
   const ahora = ahoraS(i)
   const buses = busesVigentes(i)
-  const retrasos = i.retrasos?.datos
+  const retrasos = retrasosUsables(i)
   const candidatas = rutas ? rutas.flatMap((id) => rutaDeIndice(indice, id) ?? []) : indice.rutas
   const salida: Llegada[] = []
   for (const ruta of candidatas) {
     const patron = patronDe(indice, ruta)
-    const objetivo = patron.findIndex((p) => coincide(indice, p.id, paradas))
-    if (objetivo < 0) continue
-    const parada = patron[objetivo]
+    // Un patrón circular pasa dos veces por su terminal: se guardan todas las apariciones de la parada.
+    const objetivos = patron.flatMap((p, n) => (coincide(indice, p.id, paradas) ? [n] : []))
+    if (objetivos.length === 0) continue
+    const parada = patron[objetivos[0]]
     const nombre = nombreParada(indice, parada.id)
     const base = { rutaId: ruta.id, codigo: ruta.codigo, destino: ruta.destino, sistema: SISTEMAS[ruta.agencia] ?? "otro", paradaId: parada.id, paradaNombre: nombre }
     const enVivo: Llegada[] = []
     for (const bus of buses) {
-      if (bus.rutaId !== ruta.id || viajeCancelado(retrasos, bus)) continue
+      if (bus.rutaId !== ruta.id) continue
       const u = proyectar(patron, bus.lat, bus.lng)
       if (!u) continue
       const edad = Math.max(0, Math.round(ahora - bus.ts))
-      const segundos = parada.off - u.off - edad
-      if (segundos < -TOLERANCIA_PASO_S) continue
+      // De cada bus cuenta la primera aparición de la parada que aún no pasó.
+      const alcanzable = objetivos.find((n) => patron[n].off - u.off - edad >= -TOLERANCIA_PASO_S)
+      if (alcanzable === undefined) continue
+      const segundos = patron[alcanzable].off - u.off - edad
       enVivo.push({ ...base, segundos: Math.max(0, Math.round(segundos)), origen: "en-vivo", bus: bus.etiqueta || null, retraso: retrasoDeBus(retrasos, bus, ahora), edad, adicional: retrasos?.porViaje.get(bus.tripId)?.rel === "ADDED" })
     }
     salida.push(...enVivo)
     if (!retrasos) continue
     const idsEnVivo = new Set(buses.filter((b) => b.rutaId === ruta.id).map((b) => b.id))
     for (const viaje of viajesDeRuta(retrasos, ruta.id)) {
-      if (viaje.rel === "CANCELED" || viaje.inicio <= ahora) continue
-      const llegada = viaje.inicio + parada.off + (viaje.retraso ?? 0) - ahora
-      if (llegada < 0 || llegada > HORIZONTE_PROGRAMADO_S) continue
+      // «Aún no salió» se juzga con la salida YA corregida por su retraso: una salida de hace 60 s con 600 s de retraso sigue por salir.
+      const sale = viaje.inicio + (viaje.retraso ?? 0)
+      if (viaje.rel === "CANCELED" || sale <= ahora) continue
+      const llegada = sale + parada.off - ahora
+      if (llegada > HORIZONTE_PROGRAMADO_S) continue
       if (viaje.vehiculoId && idsEnVivo.has(viaje.vehiculoId) && enVivo.some((v) => Math.abs(v.segundos - llegada) < 300)) continue
       salida.push({ ...base, segundos: Math.round(llegada), origen: "programado", bus: null, retraso: viaje.retraso, edad: 0, adicional: viaje.rel === "ADDED" })
     }
@@ -376,6 +395,21 @@ export function buscarParadas(indice: IndiceGtfs, consulta: string, max = 8): Pa
   return encontradas.sort((a, b) => a.rango - b.rango || a.p.nombre.length - b.p.nombre.length).slice(0, max).map((x) => x.p)
 }
 
+/**
+ * Estaciones y paradas cuyo nombre es EXACTAMENTE el pedido (sin importar tildes, mayúsculas ni
+ * abreviaturas que `normalize` unifica). Va antes de la búsqueda aproximada: «Br. El Virrey» es
+ * esa parada y no la estación «Virrey - Cendiatra».
+ */
+export function paradasExactas(indice: IndiceGtfs, nombre: string): ParadaEncontrada[] {
+  const q = normalize(nombre)
+  if (!q) return []
+  const exactas: ParadaEncontrada[] = []
+  for (const [id, [n, nodo, lat, lng]] of Object.entries(indice.paradas)) {
+    if ((nodo === "" || nodo === id) && normalize(n) === q) exactas.push({ id, nombre: n, lat, lng })
+  }
+  return exactas
+}
+
 // --- Alertas -------------------------------------------------------------------------------
 
 export type AlertaVigente = { id: string; titulo: string; descripcion: string; efecto: string; rutas: string[]; paradas: string[]; desde: number; hasta: number | null }
@@ -488,14 +522,15 @@ export type CanceladosHoy = { total: number; viajesDelDia: number; porRuta: { ru
 
 /** Viajes cancelados hoy según `tripupdates.pb`, en total y por ruta (sin guardar nada). `null` si aún no hay copia. */
 export function canceladosHoy(i: Instantanea, rutas?: readonly string[]): CanceladosHoy | null {
-  if (!i.retrasos) return null
+  const retrasos = retrasosUsables(i)
+  if (!retrasos) return null
   // Límites del día de Bogotá en segundos de época (sin `Intl` por viaje: son 84.000).
   const inicioDia = epocaBogota(fechaCivilEnZona(new Date(i.ahora)).replaceAll("-", ""), "00:00:00")!
   const filtro = rutas ? new Set(rutas) : null
   const cuenta = new Map<string, number>()
   let total = 0
   let delDia = 0
-  for (const v of i.retrasos.datos.porViaje.values()) {
+  for (const v of retrasos.porViaje.values()) {
     if (v.inicio < inicioDia || v.inicio >= inicioDia + 86_400) continue
     if (filtro && !filtro.has(v.rutaId)) continue
     delDia++

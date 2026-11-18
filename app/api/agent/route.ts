@@ -5,7 +5,8 @@ import { leerCuerpoLimitado } from "@/lib/cuerpo-peticion"
 import { claveCliente } from "@/lib/identidad-cliente"
 import { parseIntent, plainReply, runIntent, type AgentContext, type Intent } from "@/lib/local-agent"
 import { precalentarFeeds } from "@/lib/instantanea-servidor"
-import { necesidadesDeConsulta, responderTiempoReal } from "@/lib/respuesta-tiempo-real"
+import { MINIMO_PARA_MODELO_MS, crearPresupuesto } from "@/lib/presupuesto-agente"
+import { necesidadesDeConsulta, necesidadesPorTexto, responderTiempoReal } from "@/lib/respuesta-tiempo-real"
 import { OLLAMA_MODEL, modeloListo, ollamaConfigured, ollamaStatus, parseIntentWithOllama, warmUpOllama } from "@/lib/ollama"
 import { createRateLimiter } from "@/lib/rate-limit"
 import { conOrigenPendiente, elegirIntent, requiereModelo } from "@/lib/seleccion-interprete"
@@ -78,6 +79,8 @@ export async function GET(req: Request) {
 }
 
 export async function POST(req: Request) {
+  // Un solo presupuesto para toda la petición (catálogo + modelo + feeds): ver `lib/presupuesto-agente.ts`.
+  const presupuesto = crearPresupuesto()
   const denegado = guardarAcceso(req)
   if (denegado) return denegado
 
@@ -123,6 +126,11 @@ export async function POST(req: Request) {
 
   if (!message.trim()) return answer("No te escuché bien. Toca la pantalla e inténtalo de nuevo.")
 
+  // Los feeds se piden YA, antes de esperar el catálogo (que en frío puede tardar) y el modelo: así corren en
+  // paralelo con ellos. La caché de 15 s la comparte con la consulta que viene después.
+  const lecturaTemprana = necesidadesPorTexto(message)
+  if (lecturaTemprana) precalentarFeeds(lecturaTemprana)
+
   const data = await getTransmilenioData()
 
   // EA-27 (#53), decisión de A1 del 10/11/2026: con el modelo cargado, TODA
@@ -146,14 +154,19 @@ export async function POST(req: Request) {
     if (!modeloListo()) {
       void warmUpOllama()
     } else if (requiereModelo(intentDeReglas, origenPendiente)) {
-      try {
-        intentDelModelo = await parseIntentWithOllama(message, data)
-      } catch (error) {
-        // Solo el mensaje: el objeto de error de `fetch` trae en `cause` la dirección de Ollama.
-        console.warn("[agente] Ollama no respondió, uso las reglas:", error instanceof Error ? error.message : "error desconocido")
-        // El modelo quedó sin cargar (agotar la espera aborta la carga): se
-        // precarga aparte, y hasta entonces responden las reglas.
-        void warmUpOllama()
+      // El modelo espera lo que le quede del presupuesto, sin pasar de su propio tope y dejando lo que
+      // la respuesta necesita después; con menos de `MINIMO_PARA_MODELO_MS`, responden las reglas.
+      const esperaModelo = presupuesto.para(4_500)
+      if (esperaModelo >= MINIMO_PARA_MODELO_MS) {
+        try {
+          intentDelModelo = await parseIntentWithOllama(message, data, esperaModelo)
+        } catch (error) {
+          // Solo el mensaje: el objeto de error de `fetch` trae en `cause` la dirección de Ollama.
+          console.warn("[agente] Ollama no respondió, uso las reglas:", error instanceof Error ? error.message : "error desconocido")
+          // El modelo quedó sin cargar (agotar la espera aborta la carga): se
+          // precarga aparte, y hasta entonces responden las reglas.
+          void warmUpOllama()
+        }
       }
     }
   }
@@ -166,6 +179,6 @@ export async function POST(req: Request) {
   // una lectura que era fresca al llegar pero envejeció durante las esperas ya
   // no se usa (EA-07, #33).
   const context: AgentContext = { position: lectura, now: new Date() }
-  if (intent.type === "tiempo_real") return Response.json(await responderTiempoReal(intent.consulta, { data, context, engine }))
+  if (intent.type === "tiempo_real") return Response.json(await responderTiempoReal(intent.consulta, { data, context, engine, presupuestoMs: presupuesto.restante() }))
   return Response.json(runIntent(intent, { data, context, engine }))
 }

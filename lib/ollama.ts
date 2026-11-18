@@ -222,7 +222,7 @@ export async function ollamaStatus(): Promise<{ reachable: boolean; hasModel: bo
  * modelo no cuadra con los datos, y falla si Ollama no responde o responde algo
  * que no es suyo; en los dos casos quien llama usa las reglas.
  */
-export async function parseIntentWithOllama(text: string, data: TransmilenioData): Promise<Intent | null> {
+export async function parseIntentWithOllama(text: string, data: TransmilenioData, esperaMs: number = TIMEOUT_MS): Promise<Intent | null> {
   let contenido: string
   try {
     const response = await fetchOllama("/api/chat", {
@@ -239,7 +239,7 @@ export async function parseIntentWithOllama(text: string, data: TransmilenioData
           { role: "user", content: text },
         ],
       }),
-      signal: AbortSignal.timeout(TIMEOUT_MS),
+      signal: AbortSignal.timeout(Math.floor(Math.min(esperaMs, TIMEOUT_MS))),
     })
     if (!response.ok) throw new Error(`Ollama: HTTP ${response.status}`)
     const chat = ChatResponseSchema.safeParse(await response.json())

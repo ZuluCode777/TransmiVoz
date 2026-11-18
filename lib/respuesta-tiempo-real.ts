@@ -14,9 +14,11 @@ import {
 import type { Meta } from "@/lib/contrato-tiempo-real"
 import { indiceVigente } from "@/lib/gtfs-indice"
 import { saludDeFeeds } from "@/lib/gtfs-rt"
+import { normalize } from "@/lib/text"
 import { enTiempo, haceTiempo, plural, textoDestino, textoRetraso } from "@/lib/texto-tiempo-real"
 import { tomarContexto, type Necesidades } from "@/lib/instantanea-servidor"
 import { busesCercanos, buscarParadas, cabeceraVieja, canceladosHoy, estadoSistema, horarioDeRutas, type Llegada } from "@/lib/tiempo-real"
+import { RESERVA_RESPUESTA_MS } from "@/lib/presupuesto-agente"
 import { ubicacionVigente } from "@/lib/ubicacion"
 
 /**
@@ -44,6 +46,18 @@ const NECESIDADES: Record<ConsultaTiempoReal["tema"], Necesidades> = {
   estado_datos: { posiciones: true, alertas: true, retrasos: true },
 }
 
+/**
+ * Feeds que conviene pedir YA, solo por la letra de la frase y antes de cargar el catálogo o de que el
+ * modelo la interprete (que es cuando aún no se sabe el tema). Pedir de más cuesta poco: una lectura
+ * por feed cada 15 s, compartida. `null` si la frase no parece de tiempo real.
+ */
+export function necesidadesPorTexto(texto: string): Necesidades | null {
+  const t = normalize(texto)
+  if (!/\b(bus|buses|ruta|llega|llegan|pasa|pasan|viene|vienen|cuando|cuanto|cuantos|donde|novedad|novedades|desvio|desvios|cancelado|cancelados|servicio|cerca|parada|vivo|tiempo real|alerta|alertas|aviso|avisos|cierre|bloqueo)\b|\b[a-z]{1,2}\d{2}\b|\b\d \w\b/.test(t)) return null
+  const alertas = /\b(novedad|novedades|desvio|desvios|alerta|alertas|aviso|avisos|cierre|cierres|bloqueo|bloqueos)\b/.test(t)
+  return { posiciones: !alertas, alertas, retrasos: true }
+}
+
 /** Qué feeds lee un tema (para adelantar su lectura mientras el modelo interpreta la frase). */
 export function necesidadesDeConsulta(consulta: ConsultaTiempoReal): Necesidades {
   // Sin ruta ni estación solo se pide el dato que falta: no se lee ningún feed.
@@ -56,7 +70,13 @@ const avisoCopia = (meta: Meta) => (meta.copiaObsoleta ? " No pude actualizar y 
 
 /** Avisos que acompañan a toda respuesta en vivo: edad del dato, copia vieja y retrasos sin cargar. */
 function cierre(meta: Meta, { retrasos = false }: { retrasos?: boolean } = {}): string {
-  const sinRetrasos = retrasos && meta.retrasos === "sin-datos" ? " Aún no tengo los retrasos reportados." : ""
+  const estadoRetrasos =
+    meta.retrasos === "detenido"
+      ? ` Los retrasos y cancelaciones no se actualizan ${haceTiempo(meta.feeds.retrasos?.edadS ?? 0)}; no los incluyo.`
+      : retrasos && meta.retrasos === "sin-datos"
+        ? " Aún no tengo los retrasos reportados."
+        : ""
+  const sinRetrasos = estadoRetrasos
   return `${avisoCopia(meta)}${sinRetrasos}${edadDato(meta)}`
 }
 
@@ -128,6 +148,13 @@ export function textoAlerta(titulo: string, efecto: string): string {
 }
 
 const mayuscula = (texto: string) => texto.charAt(0).toUpperCase() + texto.slice(1)
+/** Texto de una consulta que no se pudo resolver: ruta o parada desconocida, o parada ambigua con sus opciones. */
+function textoFalla(r: { error: string; opciones?: string[] }, consulta: { ruta?: string; parada?: string }): string {
+  if (r.error === "ruta-desconocida") return `No encontré la ruta ${consulta.ruta} en los datos de TransMilenio.`
+  if (r.error === "parada-ambigua") return `Encontré varias paradas que se parecen a ${consulta.parada}: ${lista(r.opciones ?? [])}. ¿Cuál quieres? Dime el nombre completo.`
+  return `No encontré la parada ${consulta.parada}.`
+}
+
 const lista = (partes: string[]) => (partes.length > 1 ? `${partes.slice(0, -1).join(", ")} y ${partes.at(-1)}` : (partes[0] ?? ""))
 const ayudaLlegadas = "¿De qué ruta y en qué estación quieres saber? Por ejemplo: cuándo pasa el B10 por Calle 72."
 
@@ -163,18 +190,14 @@ async function resolver(consulta: ConsultaTiempoReal, ctx: Contexto, context: Ag
         if (!buses.ok) return { reply: `No encontré la ruta ${consulta.ruta} en los datos de TransMilenio.` }
         return { reply: `${resumenBuses(buses, consulta.ruta!)} Dime en qué estación quieres saber cuándo llega, por ejemplo Calle 72.${cierre(buses.meta)}`, steps: paso }
       }
-      if (!consulta.ruta) {
-        return { reply: `Dime de qué ruta quieres saber la llegada a ${consulta.parada}, por ejemplo B10.` }
-      }
-      const r = consultarLlegadas(ctx, { parada: consulta.parada, ruta: consulta.ruta })
-      if (!r.ok) {
-        return { reply: r.error === "ruta-desconocida" ? `No encontré la ruta ${consulta.ruta} en los datos de TransMilenio.` : `No encontré la parada ${consulta.parada}.`, steps: paso }
-      }
+      // Con o sin ruta: sin ruta se listan los servicios que llegan a la estación, agrupados por ruta y sentido.
+      const r = consultarLlegadas(ctx, { parada: consulta.parada, ruta: consulta.ruta, max: consulta.ruta ? 6 : 12 })
+      if (!r.ok) return { reply: textoFalla(r, consulta), steps: paso }
       if (r.motivo === "ruta-no-pasa-por-parada") {
         return { reply: `No encuentro ${r.parada} en el recorrido de la ${consulta.ruta} que tengo; puede que no pare ahí. Confirma con TransMilenio.`, steps: paso }
       }
       if (r.llegadas.length === 0) {
-        return { reply: `No veo buses de la ${consulta.ruta} que lleguen a ${r.parada} en este momento.${salidasHoyFrase(ctx, consulta.ruta)}${cierre(r.meta)}`, steps: paso }
+        return { reply: `No veo buses ${consulta.ruta ? `de la ${consulta.ruta} ` : ""}que lleguen a ${r.parada} en este momento.${consulta.ruta ? salidasHoyFrase(ctx, consulta.ruta) : ""}${cierre(r.meta)}`, steps: paso }
       }
       return { reply: `${textoLlegadas(r.llegadas, r.parada, consulta.ruta)} Son tiempos estimados y pueden variar.${cierre(r.meta, { retrasos: true })}`, steps: paso }
     }
@@ -223,10 +246,8 @@ async function resolver(consulta: ConsultaTiempoReal, ctx: Contexto, context: Ag
 
     case "novedades": {
       const r = consultarAlertas(ctx, { ruta: consulta.ruta, parada: consulta.parada })
-      const sobre = [consulta.ruta ? `la ${consulta.ruta}` : null, consulta.parada ? `la estación ${consulta.parada}` : null].filter(Boolean).join(" y ")
-      if (!r.ok) {
-        return { reply: r.error === "ruta-desconocida" ? `No encontré la ruta ${consulta.ruta} en los datos de TransMilenio.` : `No encontré la parada ${consulta.parada}.`, steps: paso }
-      }
+      const sobre = [consulta.ruta ? `la ${consulta.ruta}` : null, r.ok && r.parada ? `la estación ${r.parada}` : null].filter(Boolean).join(" y ")
+      if (!r.ok) return { reply: textoFalla(r, consulta), steps: paso }
       if (r.alertas.length === 0) return { reply: `No hay novedades vigentes${sobre ? ` en ${sobre}` : ""} en los avisos de TransMilenio.${cierre(r.meta)}`, steps: paso }
       const mostradas = r.alertas.slice(0, 3).map((a) => textoAlerta(a.titulo, a.efecto))
       const resto = r.alertas.length - mostradas.length
@@ -263,7 +284,10 @@ async function resolver(consulta: ConsultaTiempoReal, ctx: Contexto, context: Ag
       const rutas = consulta.ruta ? resolverRuta(consulta.ruta, ctx) : undefined
       if (consulta.ruta && rutas!.length === 0) return { reply: `No encontré la ruta ${consulta.ruta} en los datos de TransMilenio.`, steps: paso }
       const c = canceladosHoy(i, rutas?.map((r) => r.id))
-      if (!c) return { reply: "Todavía estoy cargando la lista de viajes cancelados de hoy. Pregúntame de nuevo en un minuto." }
+      if (!c) {
+        if (meta.retrasos === "detenido") return { reply: `La lista de viajes cancelados no se actualiza ${haceTiempo(meta.feeds.retrasos?.edadS ?? 0)}, así que no puedo decir cuántos hay hoy.` }
+        return { reply: "Todavía estoy cargando la lista de viajes cancelados de hoy. Pregúntame de nuevo en un minuto." }
+      }
       if (consulta.ruta) {
         return { reply: `Hoy hay ${plural(c.total, "viaje cancelado", "viajes cancelados")} de la ${consulta.ruta}, de ${c.viajesDelDia.toLocaleString("es-CO")} programados.`, steps: paso }
       }
@@ -308,11 +332,22 @@ function salidasHoyFrase(ctx: Contexto, ruta: string): string {
  */
 export async function responderTiempoReal(
   consulta: ConsultaTiempoReal,
-  { data, context = {}, engine = "reglas" }: { data: TransmilenioData; context?: AgentContext; engine?: AgentEngine },
+  {
+    data,
+    context = {},
+    engine = "reglas",
+    presupuestoMs,
+  }: {
+    data: TransmilenioData
+    context?: AgentContext
+    engine?: AgentEngine
+    /** Lo que queda del presupuesto de la petición: los feeds no esperan más que eso (ver `lib/presupuesto-agente.ts`). */
+    presupuestoMs?: number
+  },
 ): Promise<AgentReply> {
   let resuelto: Resuelto
   try {
-    const ctx = await tomarContexto(data, necesidadesDeConsulta(consulta), context.now?.getTime())
+    const ctx = await tomarContexto(data, necesidadesDeConsulta(consulta), context.now?.getTime(), presupuestoMs === undefined ? undefined : Math.max(0, presupuestoMs - RESERVA_RESPUESTA_MS))
     resuelto = await resolver(consulta, ctx, context)
   } catch (error) {
     console.warn("[tiempo-real] error al responder:", error instanceof Error ? error.name : "desconocido")

@@ -252,3 +252,42 @@ test(`límite: la petición ${LIMITE_TIEMPO_REAL + 1} del minuto → 429 con Ret
     e.restaurar()
   }
 })
+
+// ── Revisión R1 ──
+
+test("R1·2 una parada ambigua → 409 con las opciones; una exacta del GTFS se resuelve", async () => {
+  const ambigua = await consultar({ operacion: "llegadas", parada: "Pq. El Virrey" })
+  assert.equal(ambigua.status, 409)
+  assert.equal(ambigua.json.error, "parada-ambigua")
+  assert.ok(Array.isArray(ambigua.json.opciones) && ambigua.json.opciones.length >= 1)
+  const parecidas = await consultar({ operacion: "alertas", parada: "Plazuelas" })
+  assert.equal(parecidas.status, 409)
+  assert.ok(parecidas.json.opciones.length >= 2)
+  const exacta = await consultar({ operacion: "alertas", parada: "Br. El Virrey" })
+  assert.equal(exacta.status, 200)
+  assert.equal(exacta.json.parada, "Br. El Virrey")
+})
+
+test("R1·6 meta dice el estado de CADA feed: con tripupdates detenido y posiciones al día, no lo esconde", async () => {
+  const e = await conEndpoint()
+  try {
+    e.entorno.estado.retrasosAtrasados = 400
+    const pedir = async () => (await e.modulo.POST(post({ operacion: "llegadas", parada: "Calle 100", ruta: "B10" }))).json()
+    const primera = await pedir() // arranca la lectura de tripupdates, que no se espera
+    assert.equal(primera.meta.retrasos, "sin-datos")
+    assert.equal(primera.meta.feeds.retrasos, null)
+    await new Promise((ok) => setTimeout(ok, 50))
+    const { meta } = RespuestaLlegadasSchema.parse(await pedir())
+    assert.equal(meta.detenido, false, "las posiciones están al día")
+    assert.equal(meta.retrasos, "detenido")
+    assert.deepEqual(meta.feeds.posiciones, { edadS: 20, detenido: false, copiaObsoleta: false })
+    assert.equal(meta.feeds.retrasos?.detenido, true)
+    assert.equal(meta.feeds.retrasos?.edadS, 420)
+    assert.equal(meta.feeds.alertas, null, "las alertas no se leyeron")
+    const cancelados = await (await e.modulo.POST(post({ operacion: "cancelados-hoy" }))).json()
+    assert.equal(cancelados.cancelados, null, "no se cuentan cancelados con un feed detenido")
+    assert.equal(cancelados.meta.retrasos, "detenido")
+  } finally {
+    e.restaurar()
+  }
+})

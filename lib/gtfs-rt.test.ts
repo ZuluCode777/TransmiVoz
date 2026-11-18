@@ -92,7 +92,7 @@ test("si la lectura falla y hay copia anterior, se devuelve esa copia marcada co
   assert.equal(salud.obsoleto, true)
   assert.ok(salud.ultimoError)
   red1.fallar(null)
-  reloj += 1
+  reloj += 5_000
   assert.equal((await posiciones.leer()).obsoleto, false, "al volver la red se recupera")
 })
 
@@ -135,4 +135,77 @@ test("tripupdates: no se espera en la petición; en frío no hay copia y despué
   reloj += 61_000
   assert.equal(retrasos.leerSinEsperar(), copia, "vencido el TTL de 60 s usa la copia y refresca aparte")
   assert.equal(r.llamadas.length, 2)
+})
+
+// ── Revisión R1 ──
+
+test("R1·7 reintento: tras un fallo, tres consultas seguidas son UNA descarga; pasada la espera, otra", async () => {
+  const r = red()
+  r.fallar("sin red")
+  let reloj = 1_000_000
+  const { posiciones } = crearFuentes({ fetchFn: r.fetchFn, ahora: () => reloj })
+  for (let n = 0; n < 3; n++) await assert.rejects(posiciones.leer())
+  assert.equal(r.llamadas.length, 1, "antes: tres descargas fallidas seguidas")
+  reloj += 4_999
+  await assert.rejects(posiciones.leer())
+  assert.equal(r.llamadas.length, 1, "dentro de los 5 s de espera no se reintenta")
+  reloj += 1
+  await assert.rejects(posiciones.leer())
+  assert.equal(r.llamadas.length, 2, "cumplida la espera, un intento más")
+  r.fallar(null)
+  reloj += 5_000
+  assert.equal((await posiciones.leer()).obsoleto, false, "al volver la red se recupera y se borra la espera")
+})
+
+test("R1·7 con copia anterior y la fuente caída, las consultas usan la copia sin volver a pedir durante la espera", async () => {
+  const r = red()
+  let reloj = 1_000_000
+  const { posiciones, retrasos } = crearFuentes({ fetchFn: r.fetchFn, ahora: () => reloj })
+  await posiciones.leer()
+  r.fallar("sin red")
+  reloj += 20_000
+  for (let n = 0; n < 3; n++) assert.equal((await posiciones.leer()).obsoleto, true)
+  assert.equal(r.llamadas.length, 2, "una lectura buena y un solo intento fallido")
+  // tripupdates espera más (30 s) por su peso.
+  assert.equal(retrasos.leerSinEsperar(), null)
+  await new Promise((ok) => setTimeout(ok, 20))
+  assert.equal(r.llamadas.filter((l) => l.url.endsWith("tripupdates.pb")).length, 1)
+  retrasos.leerSinEsperar()
+  reloj += 29_000
+  retrasos.leerSinEsperar()
+  assert.equal(r.llamadas.filter((l) => l.url.endsWith("tripupdates.pb")).length, 1, "dentro de los 30 s no se vuelve a pedir")
+})
+
+/** Fetch que responde con las muestras, pero tarda `demoraMs` y anota cuántas descargas se lanzaron. */
+function redLenta(demoraMs: number) {
+  const estado = { llamadas: 0 }
+  const fetchFn = (async (url: string) => {
+    estado.llamadas++
+    await new Promise((ok) => setTimeout(ok, demoraMs))
+    const archivo = url.split("/").pop() as keyof typeof NOMBRES
+    return new Response(bytesDe(NOMBRES[archivo]), { status: 200 })
+  }) as unknown as typeof fetch
+  return { fetchFn, estado }
+}
+
+test("R1·8 con presupuesto: copia vencida y poco margen → usa la copia YA y renueva aparte; sin copia, espera solo el presupuesto", async () => {
+  const lenta = redLenta(300)
+  let reloj = 1_000_000
+  const { posiciones } = crearFuentes({ fetchFn: lenta.fetchFn, ahora: () => reloj })
+  // Sin copia: solo se espera el presupuesto (50 ms) y, como no llegó nada, falla.
+  const t0 = performance.now()
+  await assert.rejects(posiciones.leer(50))
+  assert.ok(performance.now() - t0 < 200, `esperó ${Math.round(performance.now() - t0)} ms con 50 de presupuesto`)
+  // La descarga siguió y deja copia.
+  await new Promise((ok) => setTimeout(ok, 400))
+  assert.equal(lenta.estado.llamadas, 1)
+  // Copia vencida y presupuesto menor que la espera de descarga (3,5 s): responde con la copia al instante.
+  reloj += 20_000
+  const t1 = performance.now()
+  const copia = await posiciones.leer(1_000)
+  assert.ok(performance.now() - t1 < 100, "no espera la descarga")
+  assert.ok(copia.datos.vehiculos.length > 0)
+  assert.equal(lenta.estado.llamadas, 2, "pero la renovación se lanzó")
+  await new Promise((ok) => setTimeout(ok, 400))
+  assert.equal(lenta.estado.llamadas, 2, "una sola renovación aunque llegaran más consultas")
 })

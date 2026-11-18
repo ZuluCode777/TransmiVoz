@@ -58,14 +58,14 @@ export function precalentarFeeds(necesita: Necesidades): void {
   if (necesita.retrasos) precalentarRetrasos()
 }
 
-export async function tomarInstantanea(necesita: Necesidades, ahora: number = Date.now()): Promise<Instantanea> {
+export async function tomarInstantanea(necesita: Necesidades, ahora: number = Date.now(), presupuestoMs?: number): Promise<Instantanea> {
   const leer = <T,>(quiere: boolean, lectura: () => Promise<T>) => (quiere ? lectura().catch(() => null) : Promise.resolve(null))
-  const [posiciones, alertas] = await Promise.all([leer(necesita.posiciones, () => fuentes().posiciones.leer()), leer(necesita.alertas, () => fuentes().alertas.leer())])
+  const [posiciones, alertas] = await Promise.all([leer(necesita.posiciones, () => fuentes().posiciones.leer(presupuestoMs)), leer(necesita.alertas, () => fuentes().alertas.leer(presupuestoMs))])
   return { ahora, indice: indiceGtfs(), posiciones, alertas, retrasos: necesita.retrasos ? fuentes().retrasos.leerSinEsperar() : null }
 }
 
 /** Contexto completo para resolver una consulta. */
-export async function tomarContexto(data: TransmilenioData, necesita: Necesidades, ahora?: number): Promise<Contexto> {
-  const i = await tomarInstantanea(necesita, ahora)
+export async function tomarContexto(data: TransmilenioData, necesita: Necesidades, ahora?: number, presupuestoMs?: number): Promise<Contexto> {
+  const i = await tomarInstantanea(necesita, ahora, presupuestoMs)
   return { data, i, salud: saludDeFeeds() }
 }

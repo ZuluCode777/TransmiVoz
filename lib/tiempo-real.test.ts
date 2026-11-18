@@ -13,6 +13,7 @@ import {
   estadoSistema,
   horarioDeRutas,
   llegadasEnParada,
+  retrasosUsables,
   paradasCercanas,
   proximasParadasDeBus,
   serviciosDelDia,
@@ -286,4 +287,67 @@ test("cancelados de hoy: 100.000 viajes se cuentan sin pasar de medio segundo (e
   assert.ok(performance.now() - t0 < 500, `tardó ${Math.round(performance.now() - t0)} ms`)
   assert.equal(c.viajesDelDia, 50_000)
   assert.equal(c.total, 10_000)
+})
+
+// ── Revisión R1 ──────────────────────────────────────────────────────────────
+
+/** Triángulo circular de 1 km de lado: sale de A, pasa por B y C y vuelve a A (como un patrón circular real). */
+function indiceCircular(): IndiceGtfs {
+  const p = (nombre: string, kmEste: number, kmNorte: number): [string, string, number, number] => [nombre, "", kmNorte * GRADOS_POR_KM, kmEste * GRADOS_POR_KM]
+  return IndiceGtfsSchema.parse({
+    fuente: "x", publicado: "2026-11-17", generado: "2026-11-17", sha256: "x", licencia: "x", atribucion: "x",
+    calendario: { servicios: {}, excepciones: [] },
+    rutas: [{ id: "R1", codigo: "C1", destino: "Terminal", agencia: "1", paradas: [["A", 0], ["B", 40], ["C", 80], ["A", 129]], horario: {} }],
+    paradas: { A: p("Terminal", 0, 0), B: p("Beta", 1, 0), C: p("Gama", 1, 1) },
+  })
+}
+
+test("R1·4 patrón circular: el bus que viene de vuelta llega a su terminal por la última aparición, no se pierde en la primera", () => {
+  const i = conBus({ km: 0 })
+  i.indice = indiceCircular()
+  // A mitad de la vuelta C → A (diagonal): faltan 129 − 104,5 = 24,5 s; el reporte tiene 10 s.
+  i.posiciones!.datos.vehiculos[0].lat = 0.5 * GRADOS_POR_KM
+  i.posiciones!.datos.vehiculos[0].lng = 0.5 * GRADOS_POR_KM
+  const [llegada] = llegadasEnParada(i, { paradas: new Set(["A"]) })
+  assert.ok(llegada, "antes tomaba solo la primera aparición de A (desfase 0) y descartaba al bus")
+  assert.equal(llegada.segundos, 15)
+  assert.equal(llegada.origen, "en-vivo")
+})
+
+test("R1·5 el retraso corrige la salida ANTES de decidir si ya salió: salida de hace 60 s con 600 s de retraso sigue por salir", () => {
+  const i = conBus({ km: 5, retrasos: [viaje({ tripId: "TARDE", inicio: AHORA - 60, retraso: 600 }), viaje({ tripId: "YA", inicio: AHORA - 60, retraso: 0 })] })
+  const llegadas = llegadasEnParada(i, { paradas: new Set(["B"]) })
+  // Sale en AHORA + 540; llega a B (300 s) a los 840 s. La de retraso 0 ya salió y no cuenta.
+  assert.deepEqual(llegadas.map((l) => [l.segundos, l.origen]), [[840, "programado"]])
+})
+
+test("R1·6 un tripupdates detenido (cabecera de más de 300 s) no corrige llegadas ni cancela buses ni cuenta cancelados", () => {
+  const retrasos = [viaje({ tripId: "T-CANC", rel: "CANCELED", vehiculoId: "V1" }), viaje({ tripId: "P1", inicio: AHORA + 600 })]
+  const fresco = conBus({ km: 0.5, tripId: "T-CANC", retrasos })
+  assert.equal(busesVigentes(fresco).length, 0, "con el feed al día, el viaje cancelado se descarta")
+  assert.notEqual(canceladosHoy(fresco), null)
+
+  const detenido = conBus({ km: 0.5, tripId: "T-CANC", retrasos })
+  detenido.retrasos!.datos.cabecera = AHORA - 301
+  assert.equal(busesVigentes(detenido).length, 1, "un feed detenido no cancela buses")
+  assert.deepEqual(llegadasEnParada(detenido, { paradas: new Set(["B"]) }).map((l) => l.origen), ["en-vivo"], "ni añade salidas programadas")
+  assert.equal(canceladosHoy(detenido), null)
+  assert.equal(retrasosUsables(detenido), undefined)
+  detenido.retrasos!.datos.cabecera = AHORA - 300
+  assert.ok(retrasosUsables(detenido), "a los 300 s todavía sirve")
+})
+
+test("R1·9 un viaje cancelado se excluye en UN solo lugar: llegadas, buses en vía, próximas paradas, cercanía y estado del sistema", () => {
+  const i = conBus({ km: 0.5, tripId: "T-CANC", retrasos: [viaje({ tripId: "T-CANC", rel: "CANCELED", vehiculoId: "V1" })] })
+  assert.deepEqual(busesVigentes(i), [])
+  assert.equal(estadoSistema(i).total, 0)
+  assert.deepEqual(busesDeRutas(i, ["R1"]), { buses: [], sinUbicar: 0 })
+  assert.equal(buscarBus(i, "Z1-0001"), undefined, "no se puede pedir las paradas de un bus cancelado")
+  assert.deepEqual(busesCercanos(i, { lat: 0, lng: 0.5 * GRADOS_POR_KM }, { radioM: 500 }), [])
+  assert.deepEqual(llegadasEnParada(i, { paradas: new Set(["B"]) }), [])
+  // Sin el viaje cancelado el mismo bus sí cuenta en todo.
+  const ok = conBus({ km: 0.5 })
+  assert.equal(estadoSistema(ok).total, 1)
+  assert.equal(busesDeRutas(ok, ["R1"]).buses.length, 1)
+  assert.ok(buscarBus(ok, "Z1-0001"))
 })

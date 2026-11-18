@@ -80,3 +80,10 @@ test(
     assert.deepEqual(await parseIntentWithOllama("cuándo llega el bus", data), { type: "tiempo_real", consulta: { tema: "llegadas", ruta: undefined, parada: undefined } })
   }),
 )
+
+test(
+  "R1·8 la espera que recibe del presupuesto puede ser fraccionaria (AbortSignal.timeout exige un entero)",
+  withModelOutput(extraction({ intent: "greeting" }), async () => {
+    assert.deepEqual(await parseIntentWithOllama("hola", data, 2_073.505213), { type: "greeting" })
+  }),
+)
