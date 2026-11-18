@@ -19,6 +19,28 @@ export const VENTANA_TIEMPO_REAL_MS = 60_000
 export const MAX_RADIO_M = 5_000
 export const MAX_RESULTADOS = 20
 
+/**
+ * Sistemas que se pueden pedir junto a un código («C25 zonal»), con las agencias del GTFS que cubre cada uno.
+ * Un mismo código existe en varios sistemas (C25, C15, «7»): pedirlo por sistema, o por `route_id` en `ruta`,
+ * es la forma de llegar al que no es el troncal.
+ */
+export const SISTEMAS_PEDIBLES: Record<string, readonly string[]> = {
+  troncal: ["1"],
+  dual: ["6"],
+  alimentador: ["2"],
+  alimentadora: ["2"],
+  zonal: ["3", "4", "5"],
+  "zonal urbano": ["3"],
+  urbano: ["3"],
+  "zonal complementario": ["4"],
+  complementario: ["4"],
+  "zonal especial": ["5"],
+  especial: ["5"],
+  transmicable: ["7"],
+  cable: ["7"],
+}
+const sistema = z.enum(Object.keys(SISTEMAS_PEDIBLES) as [string, ...string[]])
+
 const texto = z.string().trim().min(1).max(MAX_TEXTO)
 const coordenada = { lat: z.number().min(-90).max(90), lng: z.number().min(-180).max(180) }
 const radio = z.number().positive().max(MAX_RADIO_M)
@@ -26,9 +48,9 @@ const maximo = z.number().int().min(1).max(MAX_RESULTADOS)
 
 export const PeticionTiempoRealSchema = z.discriminatedUnion("operacion", [
   /** Próximas llegadas a una parada o estación, de una ruta o de todas. */
-  z.object({ operacion: z.literal("llegadas"), parada: texto, ruta: texto.optional(), max: maximo.optional() }),
+  z.object({ operacion: z.literal("llegadas"), parada: texto, ruta: texto.optional(), sistema: sistema.optional(), max: maximo.optional() }),
   /** Buses en vía de una ruta (código del catálogo o del GTFS), con su ubicación. */
-  z.object({ operacion: z.literal("buses-ruta"), ruta: texto }),
+  z.object({ operacion: z.literal("buses-ruta"), ruta: texto, sistema: sistema.optional() }),
   /** Siguientes paradas de un bus, por `vehicle.label` o `vehicle.id`. */
   z.object({ operacion: z.literal("proximas-paradas-bus"), bus: texto, max: maximo.optional() }),
   /** Paradas o estaciones cerca de un punto; con `conLlegadas`, las próximas llegadas de cada una. */
@@ -36,15 +58,15 @@ export const PeticionTiempoRealSchema = z.discriminatedUnion("operacion", [
   /** Buses a menos de `radio` metros de un punto. */
   z.object({ operacion: z.literal("buses-cercanos"), ...coordenada, radio: radio.optional(), max: maximo.optional() }),
   /** Alertas vigentes de una ruta y/o una parada; sin filtro, todas las vigentes. */
-  z.object({ operacion: z.literal("alertas"), ruta: texto.optional(), parada: texto.optional() }),
+  z.object({ operacion: z.literal("alertas"), ruta: texto.optional(), sistema: sistema.optional(), parada: texto.optional() }),
   /** Búsqueda de paradas por nombre, sin importar tildes ni mayúsculas. */
   z.object({ operacion: z.literal("buscar-paradas"), consulta: texto, max: maximo.optional() }),
   /** Buses en servicio ahora por sistema. */
   z.object({ operacion: z.literal("estado-sistema") }),
   /** Salidas programadas hoy de una ruta, por hora, y su primera y última. */
-  z.object({ operacion: z.literal("horario-ruta"), ruta: texto }),
+  z.object({ operacion: z.literal("horario-ruta"), ruta: texto, sistema: sistema.optional() }),
   /** Viajes cancelados hoy, en total y por ruta (sin guardar historial). */
-  z.object({ operacion: z.literal("cancelados-hoy"), ruta: texto.optional() }),
+  z.object({ operacion: z.literal("cancelados-hoy"), ruta: texto.optional(), sistema: sistema.optional() }),
   /** Edad de cada feed, si se detuvo y si se sirve una copia vieja. */
   z.object({ operacion: z.literal("salud-feeds") }),
 ])

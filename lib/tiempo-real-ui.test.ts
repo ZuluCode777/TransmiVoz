@@ -1,9 +1,10 @@
 import assert from "node:assert/strict"
 import { readFileSync } from "node:fs"
-import test, { mock } from "node:test"
+import test, { afterEach, mock } from "node:test"
 import vm from "node:vm"
 import * as jsx from "react/jsx-runtime"
 import ts from "typescript"
+import * as zodReal from "zod"
 import * as contrato from "./contrato-tiempo-real"
 import * as geo from "./geo"
 import * as textos from "./texto-tiempo-real"
@@ -280,7 +281,9 @@ test("R1·1 el resumen hablado dice la edad y el estado del dato, y un feed dete
   for (const m of [a, b, c]) m.desmontar()
 })
 
-// El hook real, con React y la red simulados.
+// El hook real, con React y la red simulados. Sus intervalos se limpian SIEMPRE (también si la prueba falla): si no, el proceso no termina.
+const hooksMontados: (() => void)[] = []
+afterEach(() => hooksMontados.splice(0).forEach((desmontar) => desmontar()))
 function montarHook(peticion0: object | null) {
   const estados: unknown[] = []
   const refs: { current: unknown }[] = []
@@ -321,7 +324,7 @@ function montarHook(peticion0: object | null) {
   const salida = ts.transpileModule(readFileSync(`${raiz}/hooks/use-tiempo-real.ts`, "utf8"), { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS } }).outputText
   const modulo = { exports: {} as { useTiempoReal: (p: object | null, e: { parse: (x: unknown) => unknown }, o?: object) => typeof resultado } }
   vm.runInNewContext(`(function(require,module,exports){${salida}\n})`, { fetch: fetchDoble, document: documento, setTimeout, clearTimeout, setInterval, clearInterval, AbortController, JSON, Date })(
-    (n: string) => (n === "react" ? react : (() => { throw new Error(n) })()),
+    (n: string) => (n === "react" ? react : n === "zod" ? zodReal : (() => { throw new Error(n) })()),
     modulo,
     modulo.exports,
   )
@@ -337,6 +340,7 @@ function montarHook(peticion0: object | null) {
     lista.forEach((f) => f())
   }
   render()
+  hooksMontados.push(() => efectos.forEach((e) => typeof e.limpieza === "function" && e.limpieza()))
   return {
     resultado: () => resultado,
     historial,
@@ -348,6 +352,8 @@ function montarHook(peticion0: object | null) {
   }
 }
 const json = (x: unknown) => new Response(JSON.stringify(x))
+/** `falla` del hook, copiada a este contexto (el hook corre en un `vm`: sus objetos no comparten prototipos con los de la prueba). */
+const fallaDe = (h: { resultado: () => unknown }) => JSON.parse(JSON.stringify((h.resultado() as { falla: unknown }).falla))
 const esperar = () => new Promise((ok) => setImmediate(ok))
 
 test("R1·3 el dato va atado a su consulta: al cambiar de estación se descarta al instante y una respuesta tardía de la anterior no entra", async () => {
@@ -439,4 +445,101 @@ test("R2·1 una sola fuente dice una llegada: ningún componente ni respuesta re
   const archivos = ["components", "lib", "hooks"].flatMap((d) => readdirSync(`${raiz}/${d}`).filter((f) => /\.tsx?$/.test(f) && !/\.test\./.test(f)).map((f) => `${d}/${f}`))
   const dueños = archivos.filter((f) => /llegaría|sin bus en vivo confirmado/.test(readFileSync(`${raiz}/${f}`, "utf8")))
   assert.deepEqual(dueños, ["lib/texto-tiempo-real.ts"])
+})
+
+// ── Revisión R3 ──
+
+const falla = (error: string, opciones: string[] = []) => ({ estado: "error", datos: null, falla: { error, opciones }, actualizadoEn: null })
+const errorDeRed = { estado: "error", datos: null, falla: null, actualizadoEn: null }
+const COMPONENTES: [string, object][] = [
+  ["LlegadasEnVivo", { parada: "Calle 100", ruta: "B10" }],
+  ["BusesEnVivo", { ruta: "B10" }],
+  ["ParadasCercanasEnVivo", { lat: 4.676, lng: -74.059 }],
+]
+
+test("R3·3 con error, el resumen hablado, el botón «Escuchar» y la región viva dicen el error (llegadas, buses y GPS)", () => {
+  mock.timers.enable({ apis: ["setTimeout", "Date"], now: 1_000_000 })
+  try {
+    for (const [nombre, props] of COMPONENTES) {
+      const e = entorno(errorDeRed)
+      const m = montar(nombre, props, e.dobles)
+      mock.timers.tick(1)
+      const region = nodos(m.arbol(), (n) => n.props["aria-live"] === "polite")
+      assert.equal(region.length, 1, nombre)
+      const dicho = texto(region[0])
+      assert.match(dicho, /^No pude consultar los (datos|buses)/, `${nombre}: antes la región viva quedaba vacía con el error`)
+      const botones = nodos(m.arbol(), (n) => n.type === "button")
+      assert.equal(botones.length, 1, `${nombre}: antes no había botón «Escuchar» con error`)
+      ;(botones[0].props.onClick as () => void)()
+      assert.equal(e.estado.dicho[0], dicho, `${nombre}: lo que se oye es lo que se muestra`)
+      assert.match(texto(m.arbol()), /No pude consultar/)
+      m.desmontar()
+    }
+  } finally {
+    mock.timers.reset()
+  }
+})
+
+test("R3·3 si falla un refresco, lo ya anunciado se reemplaza AL INSTANTE por el aviso (no espera el minuto)", () => {
+  mock.timers.enable({ apis: ["setTimeout", "Date"], now: 1_000_000 })
+  try {
+    const e = entorno(ok({ operacion: "llegadas", meta, parada: "Calle 100", ruta: "B10", motivo: null, llegadas: [llegada()] }))
+    const m = montar("LlegadasEnVivo", { parada: "Calle 100", ruta: "B10" }, e.dobles)
+    const viva = () => texto(nodos(m.arbol(), (n) => n.props["aria-live"] === "polite")[0])
+    mock.timers.tick(1)
+    assert.match(viva(), /llega a Calle 100 en unos 4 minutos/)
+    mock.timers.tick(10_000) // 10 s después, el refresco falla
+    e.estado.resultado = errorDeRed
+    m.redibujar()
+    mock.timers.tick(1)
+    assert.match(viva(), /^No pude consultar los datos en vivo ahora/, "antes: seguía la llegada vieja hasta el minuto")
+    // Y la lista de llegadas ya no se pinta.
+    assert.doesNotMatch(texto(m.arbol()), /B10 hacia Portal Norte: llega/)
+    m.desmontar()
+  } finally {
+    mock.timers.reset()
+  }
+})
+
+test("R3·2 una ambigüedad del servidor muestra, dice y anuncia sus opciones (no un «error» genérico)", () => {
+  mock.timers.enable({ apis: ["setTimeout", "Date"], now: 1_000_000 })
+  try {
+    const casos: [string, object, object, RegExp][] = [
+      ["LlegadasEnVivo", { parada: "Calle 100", ruta: "Z9" }, falla("ruta-ambigua", ["Z9 (zonal urbano)", "Z9 (zonal complementario)"]), /Hay más de un servicio con ese código: Z9 \(zonal urbano\), Z9 \(zonal complementario\)\./],
+      ["BusesEnVivo", { ruta: "Z9" }, falla("ruta-ambigua", ["Z9 (zonal urbano)", "Z9 (zonal complementario)"]), /Z9 \(zonal urbano\), Z9 \(zonal complementario\)/],
+      ["LlegadasEnVivo", { parada: "Plazuelas", ruta: "B10" }, falla("parada-ambigua", ["Br. Plazuelas del Virrey", "Pq. Público Plazuelas del Virrey"]), /Hay varias paradas que se parecen: Br\. Plazuelas del Virrey, Pq\. Público Plazuelas del Virrey\./],
+      ["LlegadasEnVivo", { parada: "Calle 100", ruta: "ZZ9" }, falla("ruta-desconocida"), /No encontré esa ruta/],
+    ]
+    for (const [nombre, props, resultado, esperado] of casos) {
+      const e = entorno(resultado)
+      const m = montar(nombre, props, e.dobles)
+      mock.timers.tick(1)
+      assert.match(texto(m.arbol()), esperado, nombre)
+      assert.match(texto(nodos(m.arbol(), (n) => n.props["aria-live"] === "polite")[0]), esperado, `${nombre}: región viva`)
+      ;(nodos(m.arbol(), (n) => n.type === "button")[0].props.onClick as () => void)()
+      assert.match(e.estado.dicho[0], esperado, `${nombre}: voz`)
+      m.desmontar()
+    }
+  } finally {
+    mock.timers.reset()
+  }
+})
+
+test("R3·2 el hook conserva el cuerpo del 409/404: código y opciones", async () => {
+  const h = montarHook({ operacion: "buses-ruta", ruta: "Z9" })
+  h.peticiones[0].resolver(new Response(JSON.stringify({ error: "ruta-ambigua", opciones: ["Z9 (zonal urbano)", "Z9 (zonal complementario)"] }), { status: 409 }))
+  await esperar()
+  assert.equal(h.resultado().estado, "error")
+  assert.equal(JSON.stringify(fallaDe(h)), JSON.stringify({ error: "ruta-ambigua", opciones: ["Z9 (zonal urbano)", "Z9 (zonal complementario)"] }), "antes se tiraba el cuerpo")
+  // Un 404 sin opciones también trae su código; un corte de red o un cuerpo ajeno, no.
+  h.cambiar({ operacion: "buses-ruta", ruta: "ZZ9" })
+  h.peticiones[1].resolver(new Response(JSON.stringify({ error: "ruta-desconocida" }), { status: 404 }))
+  await esperar()
+  assert.equal(JSON.stringify(fallaDe(h)), JSON.stringify({ error: "ruta-desconocida", opciones: [] }))
+  h.cambiar({ operacion: "buses-ruta", ruta: "B10" })
+  h.peticiones[2].resolver(new Response("<html>proxy</html>", { status: 502 }))
+  await esperar()
+  assert.equal(h.resultado().estado, "error")
+  assert.equal(fallaDe(h), null)
+  h.desmontar()
 })

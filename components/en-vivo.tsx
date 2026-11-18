@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react"
 import { Radio, Volume2 } from "lucide-react"
 import { useSpeech } from "@/hooks/use-speech"
-import { useTiempoReal } from "@/hooks/use-tiempo-real"
+import { useTiempoReal, type FallaTiempoReal } from "@/hooks/use-tiempo-real"
 import {
   RespuestaBusesRutaSchema,
   RespuestaLlegadasSchema,
@@ -32,8 +32,11 @@ import { frasesLlegada, haceTiempo, mayuscula, plural, predicadoLlegada, textoDe
 /** Cada cuánto, como mínimo, la región viva puede anunciar un cambio. */
 const ANUNCIO_MINIMO_MS = 60_000
 
-/** Anuncia `texto` en una región viva, sin repetir y sin más de uno por `ANUNCIO_MINIMO_MS`. */
-export function useAnuncioEspaciado(texto: string): string {
+/**
+ * Anuncia `texto` en una región viva, sin repetir y sin más de uno por `ANUNCIO_MINIMO_MS`. Un aviso
+ * `urgente` (un error: lo anunciado antes ya no vale) no espera el minuto.
+ */
+export function useAnuncioEspaciado(texto: string, urgente = false): string {
   const [anuncio, setAnuncio] = useState("")
   const ultimo = useRef(0)
   useEffect(() => {
@@ -43,13 +46,13 @@ export function useAnuncioEspaciado(texto: string): string {
       return
     }
     if (texto === anuncio) return
-    const espera = Math.max(0, ultimo.current + ANUNCIO_MINIMO_MS - Date.now())
+    const espera = urgente ? 0 : Math.max(0, ultimo.current + ANUNCIO_MINIMO_MS - Date.now())
     const id = setTimeout(() => {
       ultimo.current = Date.now()
       setAnuncio(texto)
     }, espera)
     return () => clearTimeout(id)
-  }, [texto, anuncio])
+  }, [texto, anuncio, urgente])
   return anuncio
 }
 
@@ -100,6 +103,23 @@ export function resumenParadas(d: RespuestaParadasCercanas): string {
   return `Cerca de ti: ${d.paradas.map(frase).join(". ")}.${sinLlegadas}${cola(d.meta)}`
 }
 
+/**
+ * Texto de un fallo, para la pantalla, el botón «Escuchar» y la región viva: lo que dijo el servidor
+ * (una ambigüedad con sus opciones, una ruta o parada desconocida) y, si no hubo respuesta, el aviso `general`.
+ */
+export function textoDeFalla(falla: FallaTiempoReal | null, general: string): string {
+  const opciones = falla?.opciones.length ? falla.opciones.join(", ") : ""
+  if (falla?.error === "parada-ambigua") return `Hay varias paradas que se parecen: ${opciones}. Dime el nombre completo.`
+  if (falla?.error === "ruta-ambigua") return `Hay más de un servicio con ese código: ${opciones}. Pide el sistema, por ejemplo «zonal» o «troncal».`
+  if (falla?.error === "ruta-desconocida") return "No encontré esa ruta en los datos de TransMilenio."
+  if (falla?.error === "parada-desconocida") return "No encontré esa parada."
+  return general
+}
+
+const FALLO_LLEGADAS = "No pude consultar los datos en vivo ahora. Confirma el horario con TransMilenio."
+const FALLO_BUSES = "No pude consultar los buses en vivo ahora. Confirma con TransMilenio."
+const FALLO_PARADAS = "No pude consultar los buses que llegan cerca ahora. Confirma con TransMilenio."
+
 function Encabezado({ titulo, resumen }: { titulo: string; resumen: string }) {
   const { speak } = useSpeech()
   return (
@@ -130,8 +150,9 @@ const nota = "text-base text-muted-foreground"
 export function LlegadasEnVivo({ parada, ruta }: { parada: string; ruta: string }) {
   const r = useTiempoReal({ operacion: "llegadas", parada, ruta, max: 4 }, RespuestaLlegadasSchema)
   const llegadas = r.datos?.llegadas ?? []
-  const resumen = r.datos === null ? "" : resumenLlegadas(parada, ruta, r.datos)
-  const anuncio = useAnuncioEspaciado(resumen)
+  // El error también se dice (botón «Escuchar») y se anuncia, sin esperar: lo anunciado antes ya no vale.
+  const resumen = r.estado === "error" ? textoDeFalla(r.falla, FALLO_LLEGADAS) : r.datos === null ? "" : resumenLlegadas(parada, ruta, r.datos)
+  const anuncio = useAnuncioEspaciado(resumen, r.estado === "error")
   return (
     <section aria-label={`Llegadas en vivo de la ${ruta} a ${parada}`} className={caja}>
       <Encabezado titulo={`Llegadas a ${parada}`} resumen={resumen} />
@@ -139,7 +160,7 @@ export function LlegadasEnVivo({ parada, ruta }: { parada: string; ruta: string 
         {anuncio}
       </p>
       {r.estado === "cargando" && <p className={nota}>Consultando los buses en vivo.</p>}
-      {r.estado === "error" && <p className="rounded-2xl border-3 border-fail bg-card p-4 text-lg font-bold">No pude consultar los datos en vivo ahora. Confirma el horario con TransMilenio.</p>}
+      {r.estado === "error" && <p className="rounded-2xl border-3 border-fail bg-card p-4 text-lg font-bold">{resumen}</p>}
       {r.datos && r.datos.motivo === "ruta-no-pasa-por-parada" && <p className="rounded-2xl border-3 border-border bg-card p-4 text-lg">No encuentro {r.datos.parada} en el recorrido de la {ruta} que tengo; puede que no pare ahí.</p>}
       {r.datos && r.datos.motivo === "feed-detenido" && <p className="rounded-2xl border-3 border-border bg-card p-4 text-lg">Los datos en vivo de TransMilenio no se están actualizando, así que no estimo llegadas.</p>}
       {r.datos && !r.datos.motivo && (
@@ -166,8 +187,8 @@ export function LlegadasEnVivo({ parada, ruta }: { parada: string; ruta: string 
 export function BusesEnVivo({ ruta }: { ruta: string }) {
   const r = useTiempoReal({ operacion: "buses-ruta", ruta }, RespuestaBusesRutaSchema)
   const buses = r.datos?.buses ?? []
-  const resumen = r.datos === null ? "" : resumenBuses(ruta, r.datos)
-  const anuncio = useAnuncioEspaciado(resumen)
+  const resumen = r.estado === "error" ? textoDeFalla(r.falla, FALLO_BUSES) : r.datos === null ? "" : resumenBuses(ruta, r.datos)
+  const anuncio = useAnuncioEspaciado(resumen, r.estado === "error")
   return (
     <section aria-label={`Buses en vivo de la ${ruta}`} className={caja}>
       <Encabezado titulo="Buses en vía" resumen={resumen} />
@@ -175,7 +196,7 @@ export function BusesEnVivo({ ruta }: { ruta: string }) {
         {anuncio}
       </p>
       {r.estado === "cargando" && <p className={nota}>Consultando los buses en vivo.</p>}
-      {r.estado === "error" && <p className="rounded-2xl border-3 border-fail bg-card p-4 text-lg font-bold">No pude consultar los datos en vivo ahora.</p>}
+      {r.estado === "error" && <p className="rounded-2xl border-3 border-fail bg-card p-4 text-lg font-bold">{resumen}</p>}
       {r.datos && <p className="text-lg">{resumen}</p>}
       {buses.length > 0 && (
         <ul className="flex flex-col gap-2">
@@ -198,8 +219,8 @@ export function BusesEnVivo({ ruta }: { ruta: string }) {
 export function ParadasCercanasEnVivo({ lat, lng }: { lat: number; lng: number }) {
   const r = useTiempoReal({ operacion: "paradas-cercanas", lat, lng, radio: 800, max: 3, conLlegadas: true }, RespuestaParadasCercanasSchema, { cadaMs: 30_000 })
   const paradas = r.datos?.paradas ?? []
-  const resumen = r.datos === null ? "" : resumenParadas(r.datos)
-  const anuncio = useAnuncioEspaciado(resumen)
+  const resumen = r.estado === "error" ? textoDeFalla(r.falla, FALLO_PARADAS) : r.datos === null ? "" : resumenParadas(r.datos)
+  const anuncio = useAnuncioEspaciado(resumen, r.estado === "error")
   return (
     <section aria-label="Paradas cercanas con llegadas en vivo" className={caja}>
       <Encabezado titulo="Buses que llegan cerca" resumen={resumen} />
@@ -207,7 +228,7 @@ export function ParadasCercanasEnVivo({ lat, lng }: { lat: number; lng: number }
         {anuncio}
       </p>
       {r.estado === "cargando" && <p className={nota}>Consultando los buses en vivo.</p>}
-      {r.estado === "error" && <p className="rounded-2xl border-3 border-fail bg-card p-4 text-lg font-bold">No pude consultar los datos en vivo ahora.</p>}
+      {r.estado === "error" && <p className="rounded-2xl border-3 border-fail bg-card p-4 text-lg font-bold">{resumen}</p>}
       {r.datos && paradas.length === 0 && <p className="rounded-2xl border-3 border-border bg-card p-4 text-lg">No encuentro paradas a menos de 800 metros de tu ubicación estimada.</p>}
       <ul className="flex flex-col gap-3">
         {paradas.map((p) => (

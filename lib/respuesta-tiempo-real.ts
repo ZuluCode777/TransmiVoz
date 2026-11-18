@@ -155,15 +155,21 @@ function textoFalla(r: { error: string; opciones?: string[] }, consulta: { ruta?
 }
 
 /** «Ojo: el código C25 también existe en zonal urbano; hablo del servicio troncal.» Los sistemas no se mezclan, y se dice. */
-const notaSistema = (r: { sistema: string | null; tambienEn: string[] }, codigo: string | undefined) =>
-  codigo && r.sistema && r.tambienEn.length > 0 ? ` Ojo: el código ${codigo} también existe en ${lista(r.tambienEn)}; hablo del servicio ${r.sistema}.` : ""
+const notaSistema = (r: { sistema: string | null; tambienEn: string[] }, dicho: string | undefined) => {
+  if (!dicho || !r.sistema || r.tambienEn.length === 0) return ""
+  // Pedida por `route_id` («12756») no hay un código que nombrar: se habla de la línea.
+  if (/^\d{4,6}$/.test(dicho)) return ` Ojo: ese servicio es del sistema ${r.sistema}; la misma línea también existe en ${lista(r.tambienEn)}.`
+  const codigo = dicho.replace(/\s*\(?\b(?:troncal|dual|alimentadora?|zonal(?: urbano| complementario| especial)?|urbano|complementario|especial|transmicable|cable)\b\)?\s*$/i, "")
+  return ` Ojo: el código ${codigo} también existe en ${lista(r.tambienEn)}; hablo del servicio ${r.sistema}.`
+}
 
 const lista = (partes: string[]) => (partes.length > 1 ? `${partes.slice(0, -1).join(", ")} y ${partes.at(-1)}` : (partes[0] ?? ""))
 const ayudaLlegadas = "¿De qué ruta y en qué estación quieres saber? Por ejemplo: cuándo pasa el B10 por Calle 72."
 
-type Resuelto = { reply: string; action?: "none" | "gps"; steps?: AgentStep[] }
+export type Resuelto = { reply: string; action?: "none" | "gps"; steps?: AgentStep[] }
 
-async function resolver(consulta: ConsultaTiempoReal, ctx: Contexto, context: AgentContext): Promise<Resuelto> {
+/** Resuelve una consulta con un contexto ya armado (feeds + índice); `responderTiempoReal` lo arma y lo llama. */
+export async function resolverTiempoReal(consulta: ConsultaTiempoReal, ctx: Contexto, context: AgentContext): Promise<Resuelto> {
   const { data, i } = ctx
   const meta = metaDe(ctx)
   const necesita = necesidadesDeConsulta(consulta)
@@ -190,7 +196,7 @@ async function resolver(consulta: ConsultaTiempoReal, ctx: Contexto, context: Ag
       if (!consulta.parada) {
         // Sin estación se dice dónde está la ruta y se pide la estación.
         const buses = consultarBusesRuta(ctx, { ruta: consulta.ruta! })
-        if (!buses.ok) return { reply: `No encontré la ruta ${consulta.ruta} en los datos de TransMilenio.` }
+        if (!buses.ok) return { reply: textoFalla(buses, consulta) }
         return { reply: `${resumenBuses(buses, consulta.ruta!)} Dime en qué estación quieres saber cuándo llega, por ejemplo Calle 72.${cierre(buses.meta)}`, steps: paso }
       }
       // Con o sin ruta: sin ruta se listan los servicios que llegan a la estación, agrupados por ruta y sentido.
@@ -207,7 +213,7 @@ async function resolver(consulta: ConsultaTiempoReal, ctx: Contexto, context: Ag
 
     case "buses": {
       const r = consultarBusesRuta(ctx, { ruta: consulta.ruta })
-      if (!r.ok) return { reply: `No encontré la ruta ${consulta.ruta} en los datos de TransMilenio.`, steps: paso }
+      if (!r.ok) return { reply: textoFalla(r, consulta), steps: paso }
       return { reply: `${resumenBuses(r, consulta.ruta)}${r.buses.length === 0 ? salidasHoyFrase(ctx, consulta.ruta) : ""}${notaSistema(r, consulta.ruta)}${cierre(r.meta)}`, steps: paso }
     }
 
@@ -352,7 +358,7 @@ export async function responderTiempoReal(
   let resuelto: Resuelto
   try {
     const ctx = await tomarContexto(data, necesidadesDeConsulta(consulta), context.now?.getTime(), presupuestoMs === undefined ? undefined : Math.max(0, presupuestoMs - RESERVA_RESPUESTA_MS))
-    resuelto = await resolver(consulta, ctx, context)
+    resuelto = await resolverTiempoReal(consulta, ctx, context)
   } catch (error) {
     console.warn("[tiempo-real] error al responder:", error instanceof Error ? error.name : "desconocido")
     resuelto = { reply: "No pude consultar los datos en vivo de TransMilenio en este momento. Inténtalo de nuevo en unos segundos." }
