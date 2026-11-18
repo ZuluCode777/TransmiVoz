@@ -133,11 +133,11 @@ test("novedades: sin avisos vigentes lo dice; con avisos vigentes los lee", asyn
 
 test("estado del sistema, cancelados y salidas de hoy", async () => {
   const entorno = instalarFeeds()
-  assert.match((await preguntar("¿cuántos buses hay en servicio?", entorno)).reply, /En este momento veo 50 buses en servicio: 36 buses de TransMilenio/)
-  assert.match((await preguntar("¿cuántos viajes tiene hoy el B10?", entorno)).reply, /Hoy, para la B10: hacia Portal Norte: 186 salidas, de 04:30 a 21:30\. Es el horario programado del GTFS, no tiempo real/)
   // `tripupdates` se lee fuera de la petición: la primera vez aún no hay copia y lo dice.
   assert.match((await preguntar("¿cuántos viajes cancelados hay hoy?", entorno)).reply, /cargando la lista de viajes cancelados/)
   await new Promise((ok) => setTimeout(ok, 50))
+  assert.match((await preguntar("¿cuántos buses hay en servicio?", entorno)).reply, /En este momento veo 50 buses en servicio: 36 buses de TransMilenio/)
+  assert.match((await preguntar("¿cuántos viajes tiene hoy el B10?", entorno)).reply, /Hoy, para la B10: hacia Portal Norte: 186 salidas, de 04:30 a 21:30\. Es el horario programado del GTFS, no tiempo real/)
   assert.match((await preguntar("¿cuántos viajes cancelados hay hoy?", entorno)).reply, /Hoy hay 78 viajes cancelados de 1\.498 programados\. Las rutas con más: 18-3 con 42/)
 })
 
@@ -288,4 +288,125 @@ test("R1·6 con tripupdates detenido las respuestas lo dicen y no usan sus retra
   assert.match(llegadas.reply, /Los retrasos y cancelaciones no se actualizan hace 7 minutos; no los incluyo\./)
   assert.doesNotMatch(llegadas.reply, /según la programación/, "un feed detenido no añade salidas programadas")
   assert.match((await preguntar("¿cuántos viajes cancelados hay hoy?", entorno)).reply, /^La lista de viajes cancelados no se actualiza hace 7 minutos, así que no puedo decir cuántos hay hoy\.$/)
+})
+
+import { necesidadesDeConsulta } from "@/lib/respuesta-tiempo-real"
+import { necesidadesDe } from "@/lib/instantanea-servidor"
+import type { PeticionTiempoReal } from "@/lib/contrato-tiempo-real"
+import { ejecutarConsulta, type Contexto } from "@/lib/consulta-tiempo-real"
+import { tomarContexto } from "@/lib/instantanea-servidor"
+
+test("R2·4 el asistente y el endpoint leen los mismos feeds para cada tema (no pueden derivar)", () => {
+  const pares: [ConsultaTiempoReal, PeticionTiempoReal["operacion"]][] = [
+    [{ tema: "llegadas", ruta: "B10", parada: "Calle 100" }, "llegadas"],
+    [{ tema: "buses", ruta: "B10" }, "buses-ruta"],
+    [{ tema: "bus", bus: "N0163" }, "proximas-paradas-bus"],
+    [{ tema: "paradas_cercanas" }, "paradas-cercanas"],
+    [{ tema: "buses_cercanos" }, "buses-cercanos"],
+    [{ tema: "sistema" }, "estado-sistema"],
+    [{ tema: "novedades" }, "alertas"],
+    [{ tema: "cancelados" }, "cancelados-hoy"],
+    [{ tema: "buscar_parada", texto: "virrey" }, "buscar-paradas"],
+    [{ tema: "salidas_hoy", ruta: "B10" }, "horario-ruta"],
+  ]
+  for (const [consulta, operacion] of pares) assert.deepEqual(necesidadesDeConsulta(consulta), necesidadesDe(operacion), consulta.tema)
+  assert.equal(necesidadesDeConsulta({ tema: "sistema" }).retrasos, true, "antes: retrasos false y el filtro de cancelados no recibía nada")
+})
+
+test("R2·4 con un viaje cancelado, el asistente y el endpoint cuentan los mismos buses en servicio", async () => {
+  const entorno = instalarFeeds()
+  entorno.estado.cancelarBuses = 1
+  // tripupdates se lee fuera de la petición: la primera pregunta lo arranca y la segunda ya lo usa.
+  await preguntar("¿cuántos buses hay en servicio?", entorno)
+  await new Promise((ok) => setTimeout(ok, 50))
+  const asistente = await preguntar("¿cuántos buses hay en servicio?", entorno)
+  const ctx: Contexto = await tomarContexto(data, necesidadesDe("estado-sistema"), entorno.reloj.ms)
+  const endpoint = ejecutarConsulta(ctx, { operacion: "estado-sistema" })
+  assert.equal(endpoint.estado, 200)
+  const total = (endpoint.cuerpo as { sistema: { total: number } }).sistema.total
+  assert.equal(total, 49, "50 buses menos el del viaje cancelado")
+  assert.match(asistente.reply, new RegExp(`veo ${total} buses en servicio`))
+})
+
+test("R2·2 «Br. El Virrey» llega entero hasta el resolver, por reglas y de punta a punta (llegadas y novedades)", async () => {
+  assert.deepEqual(consulta("¿Cuándo pasa la ruta 166 por Br. El Virrey?"), { tema: "llegadas", ruta: "166", parada: "br el virrey" })
+  assert.deepEqual(consulta("¿hay novedades en Br. El Virrey?"), { tema: "novedades", ruta: undefined, parada: "br el virrey" })
+  // Lo dicho con palabras de más al final sigue yendo al catálogo.
+  assert.deepEqual(consulta("¿Cuándo pasa el B10 por Calle 100 por favor?"), { tema: "llegadas", ruta: "B10", parada: "Calle 100" })
+  assert.deepEqual(consulta("¿cuándo pasa el B10 por Calle 100 hacia el norte?"), { tema: "llegadas", ruta: "B10", parada: "Calle 100" })
+  const entorno = instalarFeeds()
+  const novedades = await preguntar("¿hay novedades en Br. El Virrey?", entorno)
+  assert.match(novedades.reply, /No hay novedades vigentes en la estación Br\. El Virrey en los avisos/)
+  assert.doesNotMatch(novedades.reply, /Cendiatra|estación Virrey/)
+  const llegadas = await preguntar("¿Cuándo pasa la ruta CB144 por Br. El Virrey?", entorno)
+  assert.doesNotMatch(llegadas.reply, /No encontré la parada|Virrey - Cendiatra/)
+})
+
+// ── Revisión R2·5: un código, un sistema ──
+
+import { rutasGtfsDeRuta, IndiceGtfsSchema } from "@/lib/gtfs-indice"
+import { resolverRuta } from "@/lib/consulta-tiempo-real"
+
+test("R2·5 C25 y C15 del catálogo se enlazan solo con su servicio troncal, nunca con el zonal del mismo código", () => {
+  const { i } = contextoReal()
+  const ids = (codigo: string) => rutasGtfsDeRuta(data.routes.find((r) => r.code === codigo)!, data, i.indice).map((r) => r.id)
+  assert.deepEqual(ids("C25"), ["10073"], "antes también traía 12756 y 12757 (Engativá – Unicentro, zonal)")
+  assert.deepEqual(ids("C15"), ["14053"], "antes también traía 12803 y 12982 (Chapinero – Bosa, zonal)")
+  assert.deepEqual(ids("B10"), ["10075"])
+  assert.deepEqual(ids("B12").sort(), ["14075", "14078"], "las dos variantes del mismo sistema siguen")
+})
+
+test("R2·5 se dice que el código existe en otro sistema, sin mezclarlos", () => {
+  const ctx = contextoReal()
+  const c25 = resolverRuta("C25", ctx)
+  assert.equal(c25.tipo, "ok")
+  if (c25.tipo === "ok") {
+    assert.deepEqual(c25.rutas.map((r) => r.id), ["10073"])
+    assert.equal(c25.sistema, "troncal")
+    assert.deepEqual(c25.tambienEn, ["zonal urbano"])
+  }
+  const zonal = resolverRuta("CB144", ctx)
+  assert.deepEqual(zonal.tipo === "ok" ? [zonal.sistema, zonal.tambienEn] : null, ["zonal urbano", []])
+  // «7»: troncal (Polo – Portal Suba) y zonal (Consuelo – Palmitas). No es del catálogo como «7», pero hay un troncal.
+  const siete = resolverRuta("7", ctx)
+  assert.equal(siete.tipo === "ok" && siete.sistema, "troncal")
+  assert.equal(resolverRuta("ZZ999", ctx).tipo, "desconocida")
+})
+
+test("R2·5 un código que existe en dos sistemas y en ninguno es troncal ni dual se pregunta", () => {
+  const base = contextoReal()
+  const ruta = (id: string, agencia: string, destino: string) => ({ id, codigo: "Z9", destino, agencia, paradas: [["A", 0], ["B", 60]] as [string, number][], horario: {} })
+  const indice = IndiceGtfsSchema.parse({ ...base.i.indice, rutas: [ruta("1", "3", "Norte"), ruta("2", "4", "Sur")] })
+  const r = resolverRuta("Z9", { data, i: { ...base.i, indice } })
+  assert.deepEqual(r, { tipo: "ambigua", opciones: ["Z9 (zonal urbano)", "Z9 (zonal complementario)"] })
+})
+
+test("R2·5 el asistente nombra el sistema y no cuenta, lista ni suma los servicios del otro", async () => {
+  const entorno = instalarFeeds()
+  const buses = await preguntar("¿Dónde viene el C25?", entorno)
+  assert.match(buses.reply, /Ojo: el código C25 también existe en zonal urbano; hablo del servicio troncal\./)
+  assert.match((await preguntar("¿cuántos viajes tiene hoy el C25?", entorno)).reply, /Hoy, para la C25: hacia Portal Suba: \d+ salidas, de \d\d:\d\d a \d\d:\d\d\. Es el horario programado del GTFS, no tiempo real\. Ojo: el código C25/)
+  assert.doesNotMatch((await preguntar("¿cuántos viajes tiene hoy el C25?", entorno)).reply, /Engativá|Unicentro/)
+})
+
+test("R2·1 el asistente también distingue lo programado en las paradas cercanas y en las llegadas por ruta", async () => {
+  const entorno = instalarFeeds()
+  entorno.estado.soloBusesDeRutas = ["10075"] // solo la B10 tiene bus en vivo; las demás rutas quedan con salidas programadas
+  await preguntar("¿Cuándo pasa la B23 por Calle 72?", entorno) // arranca tripupdates, que no se espera
+  await new Promise((ok) => setTimeout(ok, 50))
+  const porRuta = await preguntar("¿Cuándo pasa la B23 por Calle 72?", entorno)
+  assert.match(porRuta.reply, /^Según la programación, la B23 hacia Alcalá llegaría a Calle 72 en unos \d+ minutos, estimado.*, sin bus en vivo confirmado\./)
+  assert.doesNotMatch(porRuta.reply, /^La B23 hacia Alcalá llega a/)
+  // En Calle 72 no hay ningún bus en vivo (la B10 no pasa): todo lo que sale en las paradas cercanas es programado.
+  const cerca = await preguntar("¿qué buses pasan cerca de mí?", entorno, { position: { lat: 4.65844, lng: -74.06206 } })
+  assert.match(cerca.reply, /^Cerca de tu ubicación estimada: Calle 72 - Areandina, a .*: según la programación, la \S+ hacia .* llegaría en unos \d+ minutos, estimado.*, sin bus en vivo confirmado/)
+  assert.doesNotMatch(cerca.reply, /: la \S+ hacia [^;.]* llega en/, "antes: «la 8 hacia Guatoque en unos 6 minutos, estimado»")
+})
+
+test("R2·5 entre las rutas de un mismo sistema, solo las que van de/hacia los extremos del catálogo", () => {
+  const base = contextoReal()
+  const ruta = (id: string, destino: string) => ({ id, codigo: "B10", destino, agencia: "1", paradas: [["A", 0], ["B", 60]] as [string, number][], horario: {} })
+  const indice = IndiceGtfsSchema.parse({ ...base.i.indice, rutas: [ruta("1", "Portal Norte"), ruta("2", "Portal 80"), ruta("3", "Portal Sur"), { ...ruta("4", "Portal Norte"), agencia: "3" }] })
+  const b10 = data.routes.find((r) => r.code === "B10")! // Portal 80 → Portal Norte
+  assert.deepEqual(rutasGtfsDeRuta(b10, data, indice).map((r) => r.id), ["1", "2"], "ida y vuelta sí; «Portal Sur» no es de esa ruta ni un zonal con el mismo código y el mismo destino")
 })

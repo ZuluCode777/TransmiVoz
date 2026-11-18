@@ -11,12 +11,12 @@ import {
   resolverRuta,
   type Contexto,
 } from "@/lib/consulta-tiempo-real"
-import type { Meta } from "@/lib/contrato-tiempo-real"
+import type { Meta, PeticionTiempoReal } from "@/lib/contrato-tiempo-real"
 import { indiceVigente } from "@/lib/gtfs-indice"
 import { saludDeFeeds } from "@/lib/gtfs-rt"
 import { normalize } from "@/lib/text"
-import { enTiempo, haceTiempo, plural, textoDestino, textoRetraso } from "@/lib/texto-tiempo-real"
-import { tomarContexto, type Necesidades } from "@/lib/instantanea-servidor"
+import { cuandoLlega, enTiempo, frasesLlegada, haceTiempo, mayuscula, plural, textoDestino } from "@/lib/texto-tiempo-real"
+import { necesidadesDe, tomarContexto, type Necesidades } from "@/lib/instantanea-servidor"
 import { busesCercanos, buscarParadas, cabeceraVieja, canceladosHoy, estadoSistema, horarioDeRutas, type Llegada } from "@/lib/tiempo-real"
 import { RESERVA_RESPUESTA_MS } from "@/lib/presupuesto-agente"
 import { ubicacionVigente } from "@/lib/ubicacion"
@@ -32,18 +32,21 @@ import { ubicacionVigente } from "@/lib/ubicacion"
  * - Si el feed está detenido, falla o tarda, lo dice y ofrece el horario publicado.
  */
 
-const NECESIDADES: Record<ConsultaTiempoReal["tema"], Necesidades> = {
-  llegadas: { posiciones: true, alertas: false, retrasos: true },
-  buses: { posiciones: true, alertas: false, retrasos: true },
-  bus: { posiciones: true, alertas: false, retrasos: true },
-  paradas_cercanas: { posiciones: true, alertas: false, retrasos: true },
-  buses_cercanos: { posiciones: true, alertas: false, retrasos: true },
-  sistema: { posiciones: true, alertas: false, retrasos: false },
-  novedades: { posiciones: false, alertas: true, retrasos: false },
-  cancelados: { posiciones: false, alertas: false, retrasos: true },
-  buscar_parada: { posiciones: false, alertas: false, retrasos: false },
-  salidas_hoy: { posiciones: false, alertas: false, retrasos: false },
-  estado_datos: { posiciones: true, alertas: true, retrasos: true },
+/**
+ * Operación de `/api/tiempo-real` que contesta cada tema. Los feeds que lee un tema son EXACTAMENTE los de su
+ * operación (`necesidadesDe`): así el asistente y el endpoint filtran con los mismos datos y dan los mismos números.
+ */
+const OPERACION: Record<Exclude<ConsultaTiempoReal["tema"], "estado_datos">, PeticionTiempoReal["operacion"]> = {
+  llegadas: "llegadas",
+  buses: "buses-ruta",
+  bus: "proximas-paradas-bus",
+  paradas_cercanas: "paradas-cercanas",
+  buses_cercanos: "buses-cercanos",
+  sistema: "estado-sistema",
+  novedades: "alertas",
+  cancelados: "cancelados-hoy",
+  buscar_parada: "buscar-paradas",
+  salidas_hoy: "horario-ruta",
 }
 
 /**
@@ -62,7 +65,9 @@ export function necesidadesPorTexto(texto: string): Necesidades | null {
 export function necesidadesDeConsulta(consulta: ConsultaTiempoReal): Necesidades {
   // Sin ruta ni estación solo se pide el dato que falta: no se lee ningún feed.
   if (consulta.tema === "llegadas" && !consulta.ruta && !consulta.parada) return { posiciones: false, alertas: false, retrasos: false }
-  return NECESIDADES[consulta.tema]
+  // El estado de los datos mira los tres feeds, para poder decir de cada uno si responde.
+  if (consulta.tema === "estado_datos") return { posiciones: true, alertas: true, retrasos: true }
+  return necesidadesDe(OPERACION[consulta.tema])
 }
 
 const edadDato = (meta: Meta) => (meta.edadDatosS === null ? "" : ` Datos de ${haceTiempo(meta.edadDatosS)}.`)
@@ -90,11 +95,6 @@ function horarioDeRespaldo(codigo: string | undefined, data: TransmilenioData): 
   return entreSemana ? ` Lo que tengo es el horario publicado entre semana de la ${ruta!.code}: ${entreSemana}. No es tiempo real.` : ""
 }
 
-/** Una llegada hablada: «en unos 4 minutos» y, si el retraso reportado es notable, «con unos 3 minutos de retraso reportado». */
-function llegadaHablada(l: Llegada, estimado = false): string {
-  return `${enTiempo(l.segundos)}${estimado ? ", estimado" : ""}${textoRetraso(l.retraso)}`
-}
-
 /** Agrupa por ruta y sentido, en el orden de la primera llegada de cada grupo. */
 function porRutaYSentido(llegadas: Llegada[]): Llegada[][] {
   const grupos = new Map<string, Llegada[]>()
@@ -105,17 +105,16 @@ function porRutaYSentido(llegadas: Llegada[]): Llegada[][] {
 /** «La B10 hacia Portal Norte», «la 8 hacia Guatoque». */
 const nombreServicio = (l: Llegada, etiqueta?: string) => `la ${etiqueta ?? l.codigo} ${textoDestino(l.destino)}`
 
-/** Frase de un grupo: la primera llegada en vivo y la siguiente; las programadas, aparte y rotuladas. */
+/** Frase de un grupo: la primera llegada con bus en vivo y la siguiente; la programada, aparte y rotulada como tal. */
 function frasesDeGrupo(grupo: Llegada[], parada: string, etiqueta?: string): string {
   const vivas = grupo.filter((l) => l.origen === "en-vivo")
   const programadas = grupo.filter((l) => l.origen === "programado")
+  const servicio = (l: Llegada) => nombreServicio(l, etiqueta)
   const partes: string[] = []
-  if (vivas.length > 0) {
-    partes.push(`${nombreServicio(vivas[0], etiqueta)} llega a ${parada} ${llegadaHablada(vivas[0], true)}${vivas[1] ? `; el siguiente, ${enTiempo(vivas[1].segundos)}` : ""}`)
-  }
+  if (vivas.length > 0) partes.push(`${frasesLlegada(vivas[0], servicio(vivas[0]), parada)}${vivas[1] ? `; el siguiente, ${enTiempo(vivas[1].segundos)}` : ""}`)
   if (programadas.length > 0) {
     const [primera] = programadas
-    partes.push(vivas.length > 0 ? `según la programación, otro ${llegadaHablada(primera, true)}` : `${nombreServicio(primera, etiqueta)}: la próxima salida programada llegaría ${llegadaHablada(primera, true)}, sin bus en vivo confirmado`)
+    partes.push(vivas.length > 0 ? `según la programación, otro ${cuandoLlega(primera)}` : frasesLlegada(primera, servicio(primera), parada))
   }
   return partes.join("; ")
 }
@@ -147,13 +146,17 @@ export function textoAlerta(titulo: string, efecto: string): string {
   return `${etiqueta}: ${limpio.charAt(0) + limpio.slice(1).toLowerCase()}`
 }
 
-const mayuscula = (texto: string) => texto.charAt(0).toUpperCase() + texto.slice(1)
 /** Texto de una consulta que no se pudo resolver: ruta o parada desconocida, o parada ambigua con sus opciones. */
 function textoFalla(r: { error: string; opciones?: string[] }, consulta: { ruta?: string; parada?: string }): string {
   if (r.error === "ruta-desconocida") return `No encontré la ruta ${consulta.ruta} en los datos de TransMilenio.`
+  if (r.error === "ruta-ambigua") return `Hay más de un servicio con el código ${consulta.ruta}: ${lista(r.opciones ?? [])}. ¿Cuál quieres? Dime el sistema, por ejemplo «${consulta.ruta} troncal» o «${consulta.ruta} zonal».`
   if (r.error === "parada-ambigua") return `Encontré varias paradas que se parecen a ${consulta.parada}: ${lista(r.opciones ?? [])}. ¿Cuál quieres? Dime el nombre completo.`
   return `No encontré la parada ${consulta.parada}.`
 }
+
+/** «Ojo: el código C25 también existe en zonal urbano; hablo del servicio troncal.» Los sistemas no se mezclan, y se dice. */
+const notaSistema = (r: { sistema: string | null; tambienEn: string[] }, codigo: string | undefined) =>
+  codigo && r.sistema && r.tambienEn.length > 0 ? ` Ojo: el código ${codigo} también existe en ${lista(r.tambienEn)}; hablo del servicio ${r.sistema}.` : ""
 
 const lista = (partes: string[]) => (partes.length > 1 ? `${partes.slice(0, -1).join(", ")} y ${partes.at(-1)}` : (partes[0] ?? ""))
 const ayudaLlegadas = "¿De qué ruta y en qué estación quieres saber? Por ejemplo: cuándo pasa el B10 por Calle 72."
@@ -197,15 +200,15 @@ async function resolver(consulta: ConsultaTiempoReal, ctx: Contexto, context: Ag
         return { reply: `No encuentro ${r.parada} en el recorrido de la ${consulta.ruta} que tengo; puede que no pare ahí. Confirma con TransMilenio.`, steps: paso }
       }
       if (r.llegadas.length === 0) {
-        return { reply: `No veo buses ${consulta.ruta ? `de la ${consulta.ruta} ` : ""}que lleguen a ${r.parada} en este momento.${consulta.ruta ? salidasHoyFrase(ctx, consulta.ruta) : ""}${cierre(r.meta)}`, steps: paso }
+        return { reply: `No veo buses ${consulta.ruta ? `de la ${consulta.ruta} ` : ""}que lleguen a ${r.parada} en este momento.${consulta.ruta ? salidasHoyFrase(ctx, consulta.ruta) : ""}${notaSistema(r, consulta.ruta)}${cierre(r.meta)}`, steps: paso }
       }
-      return { reply: `${textoLlegadas(r.llegadas, r.parada, consulta.ruta)} Son tiempos estimados y pueden variar.${cierre(r.meta, { retrasos: true })}`, steps: paso }
+      return { reply: `${textoLlegadas(r.llegadas, r.parada, consulta.ruta)} Son tiempos estimados y pueden variar.${notaSistema(r, consulta.ruta)}${cierre(r.meta, { retrasos: true })}`, steps: paso }
     }
 
     case "buses": {
       const r = consultarBusesRuta(ctx, { ruta: consulta.ruta })
       if (!r.ok) return { reply: `No encontré la ruta ${consulta.ruta} en los datos de TransMilenio.`, steps: paso }
-      return { reply: `${resumenBuses(r, consulta.ruta)}${r.buses.length === 0 ? salidasHoyFrase(ctx, consulta.ruta) : ""}${cierre(r.meta)}`, steps: paso }
+      return { reply: `${resumenBuses(r, consulta.ruta)}${r.buses.length === 0 ? salidasHoyFrase(ctx, consulta.ruta) : ""}${notaSistema(r, consulta.ruta)}${cierre(r.meta)}`, steps: paso }
     }
 
     case "bus": {
@@ -238,7 +241,7 @@ async function resolver(consulta: ConsultaTiempoReal, ctx: Contexto, context: Ag
       if (r.paradas.length === 0) return { reply: `No encuentro paradas a menos de 800 metros de tu ubicación estimada.${cierre(meta)}`, steps: paso }
       const partes = r.paradas.map((p) => {
         const grupos = porRutaYSentido(p.llegadas ?? []).slice(0, 2)
-        const llegadas = grupos.length ? `: ${grupos.map((g) => `${nombreServicio(g[0])} ${llegadaHablada(g[0], true)}`).join("; ")}` : ", sin llegadas que pueda estimar ahora"
+        const llegadas = grupos.length ? `: ${grupos.map((g) => frasesLlegada(g[0], nombreServicio(g[0]))).join("; ")}` : ", sin llegadas que pueda estimar ahora"
         return `${p.nombre}, a ${spokenDistance(p.distancia)}${llegadas}`
       })
       return { reply: `Cerca de tu ubicación estimada: ${partes.join(". ")}. Son tiempos estimados.${cierre(r.meta)}`, steps: paso }
@@ -248,11 +251,11 @@ async function resolver(consulta: ConsultaTiempoReal, ctx: Contexto, context: Ag
       const r = consultarAlertas(ctx, { ruta: consulta.ruta, parada: consulta.parada })
       const sobre = [consulta.ruta ? `la ${consulta.ruta}` : null, r.ok && r.parada ? `la estación ${r.parada}` : null].filter(Boolean).join(" y ")
       if (!r.ok) return { reply: textoFalla(r, consulta), steps: paso }
-      if (r.alertas.length === 0) return { reply: `No hay novedades vigentes${sobre ? ` en ${sobre}` : ""} en los avisos de TransMilenio.${cierre(r.meta)}`, steps: paso }
+      if (r.alertas.length === 0) return { reply: `No hay novedades vigentes${sobre ? ` en ${sobre}` : ""} en los avisos de TransMilenio.${notaSistema(r, consulta.ruta)}${cierre(r.meta)}`, steps: paso }
       const mostradas = r.alertas.slice(0, 3).map((a) => textoAlerta(a.titulo, a.efecto))
       const resto = r.alertas.length - mostradas.length
       return {
-        reply: `Hay ${plural(r.alertas.length, "novedad vigente", "novedades vigentes")}${sobre ? ` en ${sobre}` : ""}: ${mostradas.join("; ")}${resto > 0 ? `; y ${resto} más` : ""}. Confirma con TransMilenio antes de salir.${cierre(r.meta)}`,
+        reply: `Hay ${plural(r.alertas.length, "novedad vigente", "novedades vigentes")}${sobre ? ` en ${sobre}` : ""}: ${mostradas.join("; ")}${resto > 0 ? `; y ${resto} más` : ""}. Confirma con TransMilenio antes de salir.${notaSistema(r, consulta.ruta)}${cierre(r.meta)}`,
         steps: paso,
       }
     }
@@ -273,23 +276,23 @@ async function resolver(consulta: ConsultaTiempoReal, ctx: Contexto, context: Ag
     }
 
     case "salidas_hoy": {
-      const rutas = resolverRuta(consulta.ruta, ctx)
-      if (rutas.length === 0) return { reply: `No encontré la ruta ${consulta.ruta} en los datos de TransMilenio.`, steps: paso }
-      const horarios = horarioDeRutas(i.indice, rutas.map((r) => r.id), i.ahora)
+      const res = resolverRuta(consulta.ruta, ctx)
+      if (res.tipo !== "ok") return { reply: textoFalla(res.tipo === "ambigua" ? { error: "ruta-ambigua", opciones: res.opciones } : { error: "ruta-desconocida" }, consulta), steps: paso }
+      const horarios = horarioDeRutas(i.indice, res.rutas.map((r) => r.id), i.ahora)
       const partes = horarios.map((h) => (h.salidasHoy === 0 ? `${textoDestino(h.destino)}: hoy no tiene salidas programadas` : `${textoDestino(h.destino)}: ${plural(h.salidasHoy, "salida", "salidas")}, de ${h.primera} a ${h.ultima}`))
-      return { reply: `Hoy, para la ${consulta.ruta}: ${partes.join("; ")}. Es el horario programado del GTFS, no tiempo real.`, steps: paso }
+      return { reply: `Hoy, para la ${consulta.ruta}: ${partes.join("; ")}. Es el horario programado del GTFS, no tiempo real.${notaSistema(res, consulta.ruta)}`, steps: paso }
     }
 
     case "cancelados": {
-      const rutas = consulta.ruta ? resolverRuta(consulta.ruta, ctx) : undefined
-      if (consulta.ruta && rutas!.length === 0) return { reply: `No encontré la ruta ${consulta.ruta} en los datos de TransMilenio.`, steps: paso }
-      const c = canceladosHoy(i, rutas?.map((r) => r.id))
+      const res = consulta.ruta ? resolverRuta(consulta.ruta, ctx) : undefined
+      if (res && res.tipo !== "ok") return { reply: textoFalla(res.tipo === "ambigua" ? { error: "ruta-ambigua", opciones: res.opciones } : { error: "ruta-desconocida" }, consulta), steps: paso }
+      const c = canceladosHoy(i, res?.rutas.map((r) => r.id))
       if (!c) {
         if (meta.retrasos === "detenido") return { reply: `La lista de viajes cancelados no se actualiza ${haceTiempo(meta.feeds.retrasos?.edadS ?? 0)}, así que no puedo decir cuántos hay hoy.` }
         return { reply: "Todavía estoy cargando la lista de viajes cancelados de hoy. Pregúntame de nuevo en un minuto." }
       }
       if (consulta.ruta) {
-        return { reply: `Hoy hay ${plural(c.total, "viaje cancelado", "viajes cancelados")} de la ${consulta.ruta}, de ${c.viajesDelDia.toLocaleString("es-CO")} programados.`, steps: paso }
+        return { reply: `Hoy hay ${plural(c.total, "viaje cancelado", "viajes cancelados")} de la ${consulta.ruta}, de ${c.viajesDelDia.toLocaleString("es-CO")} programados.${notaSistema(res!, consulta.ruta)}`, steps: paso }
       }
       // Un mismo código tiene varios `route_id` (ida, vuelta, variantes): se suman.
       const porCodigo = new Map<string, number>()
@@ -320,9 +323,10 @@ function resumenBuses(r: { buses: { etiqueta: string; destino: string; anterior:
 
 /** «Hoy tiene 186 salidas programadas, de 04:30 a 21:30.» para explicar por qué no hay buses. */
 function salidasHoyFrase(ctx: Contexto, ruta: string): string {
-  const rutas = resolverRuta(ruta, ctx)
-  const h = horarioDeRutas(ctx.i.indice, rutas.map((r) => r.id), ctx.i.ahora).find((x) => x.salidasHoy > 0)
-  return h ? ` Hoy tiene salidas programadas de ${h.primera} a ${h.ultima}.` : rutas.length ? " Según el GTFS, hoy no tiene salidas programadas." : ""
+  const res = resolverRuta(ruta, ctx)
+  if (res.tipo !== "ok") return ""
+  const h = horarioDeRutas(ctx.i.indice, res.rutas.map((r) => r.id), ctx.i.ahora).find((x) => x.salidasHoy > 0)
+  return h ? ` Hoy tiene salidas programadas de ${h.primera} a ${h.ultima}.` : " Según el GTFS, hoy no tiene salidas programadas."
 }
 
 /**

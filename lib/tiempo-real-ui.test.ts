@@ -206,7 +206,7 @@ test("paradas cercanas: nombre, distancia y llegadas estimadas, o que no hay lle
   const m = montar("ParadasCercanasEnVivo", { lat: 4.676, lng: -74.059 }, e.dobles)
   const t = texto(m.arbol())
   assert.match(t, /Virrey - Cendiatra/)
-  assert.match(t, /B10 hacia Portal Norte: en unos 4 minutos, estimado/)
+  assert.match(t, /B10 hacia Portal Norte: llega en unos 4 minutos, estimado/)
   assert.match(t, /Sin llegadas que pueda estimar ahora/)
   assert.match(t, /Datos de hace 40 segundos/)
   m.desmontar()
@@ -409,4 +409,34 @@ test("R1·3 la región viva se vacía al cambiar de consulta: el aviso de otra e
   } finally {
     mock.timers.reset()
   }
+})
+
+// ── Revisión R2 ──
+
+import { readdirSync } from "node:fs"
+
+test("R2·1 el GPS distingue lo programado de lo confirmado, en la lista y en la voz", () => {
+  const programada = llegada({ origen: "programado", bus: null, codigo: "8", destino: "Guatoque", segundos: 360 })
+  const vivaAdemas = llegada({ codigo: "B10", segundos: 120 })
+  const e = entorno(ok({
+    operacion: "paradas-cercanas", meta,
+    paradas: [
+      { id: "1", nombre: "Calle 72 - Areandina", lat: 4.6, lng: -74, distancia: 80, llegadas: [programada] },
+      { id: "2", nombre: "Calle 85", lat: 4.6, lng: -74, distancia: 400, llegadas: [vivaAdemas] },
+    ],
+  }))
+  const m = montar("ParadasCercanasEnVivo", { lat: 4.676, lng: -74.059 }, e.dobles)
+  const t = texto(m.arbol())
+  assert.match(t, /8 hacia Guatoque: según la programación, llegaría en unos 6 minutos, estimado, sin bus en vivo confirmado/, "antes: «en unos 6 minutos, estimado» bajo «En vivo»")
+  assert.match(t, /B10 hacia Portal Norte: llega en unos 4 minutos|B10 hacia Portal Norte: llega en unos 2 minutos/)
+  ;(nodos(m.arbol(), (n) => n.type === "button")[0].props.onClick as () => void)()
+  assert.match(e.estado.dicho[0], /Calle 72 - Areandina, a .*: según la programación, la 8 hacia Guatoque llegaría en unos 6 minutos, estimado, sin bus en vivo confirmado/)
+  assert.match(e.estado.dicho[0], /Calle 85, a .*: la B10 hacia Portal Norte llega en unos 2 minutos, estimado/)
+  m.desmontar()
+})
+
+test("R2·1 una sola fuente dice una llegada: ningún componente ni respuesta repite «llegaría» o «sin bus en vivo confirmado»", () => {
+  const archivos = ["components", "lib", "hooks"].flatMap((d) => readdirSync(`${raiz}/${d}`).filter((f) => /\.tsx?$/.test(f) && !/\.test\./.test(f)).map((f) => `${d}/${f}`))
+  const dueños = archivos.filter((f) => /llegaría|sin bus en vivo confirmado/.test(readFileSync(`${raiz}/${f}`, "utf8")))
+  assert.deepEqual(dueños, ["lib/texto-tiempo-real.ts"])
 })

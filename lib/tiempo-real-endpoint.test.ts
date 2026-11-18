@@ -291,3 +291,19 @@ test("R1·6 meta dice el estado de CADA feed: con tripupdates detenido y posicio
     e.restaurar()
   }
 })
+
+// ── Revisión R2 ──
+
+test("R2·5 el endpoint no mezcla sistemas: C25 trae solo su troncal y avisa del zonal", async () => {
+  const { status, json } = await consultar({ operacion: "buses-ruta", ruta: "C25" })
+  assert.equal(status, 200)
+  const r = RespuestaBusesRutaSchema.parse(json)
+  assert.deepEqual(r.destinos, ["Portal Suba"], "antes sumaba Engativá || Unicentro")
+  assert.equal(r.sistema, "troncal")
+  assert.deepEqual(r.tambienEn, ["zonal urbano"])
+  const horario = await consultar({ operacion: "horario-ruta", ruta: "C25" })
+  assert.deepEqual(horario.json.horarios.map((h: { destino: string }) => h.destino), ["Portal Suba"])
+  assert.deepEqual(horario.json.tambienEn, ["zonal urbano"])
+  const llegadas = RespuestaLlegadasSchema.parse((await consultar({ operacion: "llegadas", parada: "Calle 100", ruta: "B10" })).json)
+  assert.deepEqual([llegadas.sistema, llegadas.tambienEn], ["troncal", []])
+})

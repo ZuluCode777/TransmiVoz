@@ -351,3 +351,17 @@ test("R1·9 un viaje cancelado se excluye en UN solo lugar: llegadas, buses en v
   assert.equal(busesDeRutas(ok, ["R1"]).buses.length, 1)
   assert.ok(buscarBus(ok, "Z1-0001"))
 })
+
+// ── Revisión R2 ──
+
+test("R2·3 el retraso de un bus (en vía y cercanos) solo sale de un tripupdates al día", () => {
+  const reciente = viaje({ tripId: "R-NEW", vehiculoId: "V1", retraso: 138, ts: AHORA - 30, inicio: AHORA - 3000 })
+  const al_dia = conBus({ km: 0.5, retrasos: [reciente] })
+  assert.equal(busesDeRutas(al_dia, ["R1"]).buses[0].retraso, 138)
+  assert.equal(busesCercanos(al_dia, { lat: 0, lng: 0.5 * GRADOS_POR_KM })[0].retraso, 138)
+  const detenido = conBus({ km: 0.5, retrasos: [reciente] })
+  detenido.retrasos!.datos.cabecera = AHORA - 400
+  assert.equal(busesDeRutas(detenido, ["R1"]).buses[0].retraso, null, "antes devolvía 138 con la cabecera de hace 400 s")
+  assert.equal(busesCercanos(detenido, { lat: 0, lng: 0.5 * GRADOS_POR_KM })[0].retraso, null)
+  assert.equal(llegadasEnParada(detenido, { paradas: new Set(["B"]) })[0].retraso, null)
+})

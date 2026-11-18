@@ -14,7 +14,7 @@ import {
   type RespuestaParadasCercanas,
 } from "@/lib/contrato-tiempo-real"
 import { spokenDistance } from "@/lib/geo"
-import { enTiempo, haceTiempo, plural, textoDestino, textoRetraso } from "@/lib/texto-tiempo-real"
+import { frasesLlegada, haceTiempo, mayuscula, plural, predicadoLlegada, textoDestino } from "@/lib/texto-tiempo-real"
 
 /**
  * Datos EN VIVO de TransMilenio dentro de las pantallas (ruta, viaje, GPS).
@@ -80,12 +80,7 @@ export function resumenLlegadas(parada: string, ruta: string, d: RespuestaLlegad
   if (d.motivo === "ruta-no-pasa-por-parada") return `No encuentro ${d.parada} en el recorrido de la ${ruta} que tengo; puede que no pare ahí.`
   const [l] = d.llegadas
   if (!l) return `No veo buses de la ${ruta} que lleguen a ${parada} ahora.${cola(d.meta)}`
-  const servicio = `la ${ruta} ${textoDestino(l.destino)}`
-  const frase =
-    l.origen === "en-vivo"
-      ? `${servicio} llega a ${parada} ${enTiempo(l.segundos)}, estimado${textoRetraso(l.retraso)}`
-      : `Según la programación, ${servicio} llegaría a ${parada} ${enTiempo(l.segundos)}, estimado${textoRetraso(l.retraso)}, sin bus en vivo confirmado`
-  return `${l.origen === "en-vivo" ? frase.charAt(0).toUpperCase() + frase.slice(1) : frase}.${cola(d.meta)}`
+  return `${mayuscula(frasesLlegada(l, `la ${ruta} ${textoDestino(l.destino)}`, parada))}.${cola(d.meta)}`
 }
 
 export function resumenBuses(ruta: string, d: RespuestaBusesRuta): string {
@@ -99,7 +94,7 @@ export function resumenParadas(d: RespuestaParadasCercanas): string {
   if (d.paradas.length === 0) return `No encuentro paradas a menos de 800 metros.${cola(d.meta)}`
   const frase = (p: (typeof d.paradas)[number]) => {
     const [l] = p.llegadas ?? []
-    return `${p.nombre}, a ${spokenDistance(p.distancia)}${l ? `: la ${l.codigo} ${textoDestino(l.destino)} ${enTiempo(l.segundos)}, estimado` : ""}`
+    return `${p.nombre}, a ${spokenDistance(p.distancia)}${l ? `: ${frasesLlegada(l, `la ${l.codigo} ${textoDestino(l.destino)}`)}` : ""}`
   }
   const sinLlegadas = d.meta.detenido ? " No estimo llegadas." : ""
   return `Cerca de ti: ${d.paradas.map(frase).join(". ")}.${sinLlegadas}${cola(d.meta)}`
@@ -155,7 +150,7 @@ export function LlegadasEnVivo({ parada, ruta }: { parada: string; ruta: string 
                 {l.codigo} {textoDestino(l.destino)}
               </span>
               {": "}
-              {l.origen === "en-vivo" ? "llega" : "según la programación, llegaría"} {enTiempo(l.segundos)}, estimado{textoRetraso(l.retraso)}
+              {predicadoLlegada(l)}
               {l.bus ? `. Bus ${l.bus}` : ""}
             </li>
           ))}
@@ -228,7 +223,7 @@ export function ParadasCercanasEnVivo({ lat, lng }: { lat: number; lng: number }
                     <span className="font-bold">
                       {l.codigo} {textoDestino(l.destino)}
                     </span>
-                    {`: ${enTiempo(l.segundos)}, estimado${textoRetraso(l.retraso)}`}
+                    {`: ${predicadoLlegada(l)}`}
                   </li>
                 ))}
               </ul>

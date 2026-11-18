@@ -33,6 +33,19 @@ export const RutaIndiceSchema = z.object({
 })
 export type RutaIndice = z.infer<typeof RutaIndiceSchema>
 
+/** Sistema de cada agencia del GTFS. */
+export const SISTEMAS: Record<string, string> = {
+  "1": "troncal",
+  "2": "alimentador",
+  "3": "zonal urbano",
+  "4": "zonal complementario",
+  "5": "zonal especial",
+  "6": "dual",
+  "7": "TransMiCable",
+}
+/** Las agencias que son del catálogo de ArcGIS (rutas troncales y duales): solo con ellas se enlaza un código del catálogo. */
+export const AGENCIAS_DEL_CATALOGO: ReadonlySet<string> = new Set(["1", "6"])
+
 export const IndiceGtfsSchema = z.object({
   fuente: z.string(),
   /** Fecha (AAAA-MM-DD) de publicación del GTFS del que sale. */
@@ -86,11 +99,19 @@ function coincidencias(a: string, b: string): number {
  * coincidencia clara devuelve vacío: ninguna adivinanza.
  */
 export function rutasGtfsDeRuta(ruta: BusRoute, data: TransmilenioData, indice: IndiceGtfs): RutaIndice[] {
-  const exactas = indice.rutas.filter((r) => r.codigo === ruta.code)
-  if (exactas.length > 0) return exactas
+  // Solo troncales y duales: el mismo código existe en el sistema zonal con otros servicios (C25, C15…) y no se mezcla.
+  const delCatalogo = indice.rutas.filter((r) => AGENCIAS_DEL_CATALOGO.has(r.agencia))
+  const exactas = delCatalogo.filter((r) => r.codigo === ruta.code)
+  if (exactas.length > 0) {
+    // Y, entre las del mismo sistema, las que más se parecen a los extremos del catálogo (ida, vuelta y variantes);
+    // sin ninguna coincidencia no se descarta nada.
+    const puntaje = (r: RutaIndice) => Math.max(coincidencias(ruta.to, r.destino), coincidencias(ruta.from, r.destino))
+    const mejor = Math.max(...exactas.map(puntaje))
+    return mejor > 0 ? exactas.filter((r) => puntaje(r) === mejor) : exactas
+  }
   const numerada = /^(\d+)\s?[A-Z]$/.exec(ruta.code)
   if (!numerada) return []
-  const candidatas = indice.rutas.filter((r) => r.codigo === numerada[1])
+  const candidatas = delCatalogo.filter((r) => r.codigo === numerada[1])
   const hermanas = data.routes.filter((r) => new RegExp(`^${numerada[1]}\\s?[A-Z]$`).test(r.code))
   const pares = hermanas
     .flatMap((h) => candidatas.map((c) => ({ h, c, puntaje: coincidencias(h.to, c.destino) })))

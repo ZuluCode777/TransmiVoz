@@ -1,7 +1,7 @@
 import { diaSemanaDeFecha, fechaCivilEnZona } from "@/lib/evidencia"
 import { distanceMeters } from "@/lib/geo"
 import { epocaBogota, FEED_DETENIDO_S, RETRASO_VIEJO_S, VEHICULO_VIEJO_S, type AlertaRt, type Alertas, type Lectura, type Posiciones, type Retrasos, type Vehiculo, type ViajeRt } from "@/lib/gtfs-rt"
-import type { IndiceGtfs, RutaIndice } from "@/lib/gtfs-indice"
+import { SISTEMAS, type IndiceGtfs, type RutaIndice } from "@/lib/gtfs-indice"
 import { normalize } from "@/lib/text"
 import { textoDestino } from "@/lib/texto-tiempo-real"
 
@@ -27,15 +27,6 @@ const TOLERANCIA_PASO_S = 30
 /** Las salidas programadas que se añaden a las llegadas en vivo no pasan de esta ventana. */
 export const HORIZONTE_PROGRAMADO_S = 3600
 
-export const SISTEMAS: Record<string, string> = {
-  "1": "troncal",
-  "2": "alimentador",
-  "3": "zonal urbano",
-  "4": "zonal complementario",
-  "5": "zonal especial",
-  "6": "dual",
-  "7": "TransMiCable",
-}
 
 export type Instantanea = {
   /** Instante de la consulta, en ms. */
@@ -297,7 +288,7 @@ function ubicarBus(i: Instantanea, bus: Vehiculo, ruta: RutaIndice | undefined):
     edad: Math.max(0, Math.round(ahoraS(i) - bus.ts)),
     anterior: null,
     siguiente: null,
-    retraso: retrasoDeBus(i.retrasos?.datos, bus, ahoraS(i)),
+    retraso: retrasoDeBus(retrasosUsables(i), bus, ahoraS(i)),
   }
   if (!ruta) return base
   const patron = patronDe(i.indice, ruta)
@@ -545,3 +536,4 @@ export function canceladosHoy(i: Instantanea, rutas?: readonly string[]): Cancel
 }
 
 export { textoDestino }
+export { SISTEMAS }

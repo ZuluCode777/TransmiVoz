@@ -279,8 +279,8 @@ export async function parseIntentWithOllama(text: string, data: TransmilenioData
     case "fares":
       return { type: "unsupported", topic: "tarifas" }
     case "realtime":
-      // El modelo solo aporta la ruta y la estación; el tema lo lee la misma regla que las reglas.
-      return { type: "tiempo_real", consulta: consultaTiempoRealDeModelo(text, data, { ruta: route, parada: place(destination) }) }
+      // El modelo solo aporta la ruta (validada) y, si la dijo la persona, el nombre de la parada tal cual (lo valida el servidor contra todo el GTFS); el tema lo lee la misma regla que las reglas.
+      return { type: "tiempo_real", consulta: consultaTiempoRealDeModelo(text, data, { ruta: route, parada: destination || undefined }) }
     default:
       return { type: intent }
   }

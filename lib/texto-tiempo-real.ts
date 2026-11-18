@@ -30,3 +30,30 @@ export function textoRetraso(retrasoS: number | null): string {
   if (retrasoS === null || Math.abs(retrasoS) < 180) return ""
   return `, con unos ${Math.round(Math.abs(retrasoS) / 60)} minutos de ${retrasoS > 0 ? "retraso" : "adelanto"} reportado`
 }
+
+export const mayuscula = (texto: string) => texto.charAt(0).toUpperCase() + texto.slice(1)
+
+/** Lo mínimo de una llegada para decirla: de dónde sale el dato, cuánto falta y su retraso. */
+export type LlegadaDicha = { origen: "en-vivo" | "programado"; segundos: number; retraso: number | null }
+
+/** «en unos 4 minutos, estimado, con unos 3 minutos de retraso reportado». */
+export const cuandoLlega = (l: LlegadaDicha) => `${enTiempo(l.segundos)}, estimado${textoRetraso(l.retraso)}`
+
+const SIN_BUS_EN_VIVO = ", sin bus en vivo confirmado"
+
+/**
+ * ÚNICO lugar que dice una llegada, en voz y en pantalla (asistente, detalle de ruta, plan de viaje y GPS):
+ * una llegada con un bus ubicado «llega»; una que solo sale del horario programado (con su retraso) dice
+ * que es «según la programación» y que no hay bus en vivo confirmado. Así ninguna pantalla puede anunciar
+ * como bus en vivo lo que no lo es.
+ */
+export function predicadoLlegada(l: LlegadaDicha, parada?: string): string {
+  const a = parada ? ` a ${parada}` : ""
+  return l.origen === "en-vivo" ? `llega${a} ${cuandoLlega(l)}` : `según la programación, llegaría${a} ${cuandoLlega(l)}${SIN_BUS_EN_VIVO}`
+}
+
+/** Frase completa de una llegada: «la B10 hacia Portal Norte llega a Calle 100 en…» o «según la programación, la B10… llegaría…». */
+export function frasesLlegada(l: LlegadaDicha, servicio: string, parada?: string): string {
+  const a = parada ? ` a ${parada}` : ""
+  return l.origen === "en-vivo" ? `${servicio} ${predicadoLlegada(l, parada)}` : `según la programación, ${servicio} llegaría${a} ${cuandoLlega(l)}${SIN_BUS_EN_VIVO}`
+}

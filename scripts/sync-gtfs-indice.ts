@@ -21,19 +21,19 @@
  * Licencia del GTFS: CC BY-SA 4.0, TransMilenio S.A. El índice es una obra
  * derivada y conserva la atribución en sus metadatos.
  */
-import { spawn } from "node:child_process"
+import { execFileSync, spawn } from "node:child_process"
 import { createHash } from "node:crypto"
-import { createReadStream, createWriteStream, mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs"
+import { createReadStream, createWriteStream, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join, resolve, sep } from "node:path"
 import { createInterface } from "node:readline"
 import { Readable } from "node:stream"
 import { pipeline } from "node:stream/promises"
-import { esFechaIso, fechaCivilEnZona } from "@/lib/evidencia"
+import { MAX_EVIDENCIA_DIAS, fechaCivilEnZona } from "@/lib/evidencia"
+import { fechaDePublicacionDelZip, gtfsVencido } from "@/lib/gtfs-publicacion"
 import type { IndiceGtfs, RutaIndice } from "@/lib/gtfs-indice"
 
 const URL_GTFS = "https://gtfs.transmilenio.gov.co/GTFS.zip"
-const URL_MANIFIESTO = "https://gtfs.transmilenio.gov.co/manifest.json"
 
 /** Separa una línea CSV; solo recurre al análisis con comillas si las hay. */
 function campos(linea: string): string[] {
@@ -98,13 +98,6 @@ async function sha256(archivo: string): Promise<string> {
   return hash.digest("hex")
 }
 
-async function fechaDelManifiesto(): Promise<string> {
-  const respuesta = await fetch(URL_MANIFIESTO, { headers: { "User-Agent": "visionaria-indice-gtfs" }, signal: AbortSignal.timeout(15_000) })
-  const { generated_at } = (await respuesta.json()) as { generated_at?: string }
-  if (!generated_at || !esFechaIso(generated_at.slice(0, 10))) throw new Error("manifest.json sin generated_at")
-  return generated_at.slice(0, 10)
-}
-
 const argumento = process.argv[2]
 let carpeta: string | null = null
 let zip: string
@@ -118,8 +111,10 @@ try {
     if (!respuesta.ok || !respuesta.body) throw new Error(`GTFS.zip: HTTP ${respuesta.status}`)
     await pipeline(Readable.fromWeb(respuesta.body as never), createWriteStream(zip))
   }
-  // Fecha de generación del GTFS (hora de Bogotá) según el manifiesto; sin él, la del archivo.
-  const publicado = await fechaDelManifiesto().catch(() => fechaCivilEnZona(statSync(zip).mtime))
+  // Fecha de publicación: la del PROPIO zip (hora de sus entradas), nunca la del manifiesto de hoy ni la del
+  // archivo en disco. Un zip viejo da una fecha vieja, y un índice vencido no se estampa como nuevo.
+  const publicado = fechaDePublicacionDelZip(execFileSync("unzip", ["-l", zip], { encoding: "utf8", maxBuffer: 1 << 20 }))
+  if (gtfsVencido(publicado)) throw new Error(`Este GTFS es del ${publicado}, de hace más de ${MAX_EVIDENCIA_DIAS} días: baja el vigente (sin argumento) y vuelve a correr.`)
 
   // routes.txt: toda la red (troncal, dual, alimentador, zonal y TransMiCable).
   const rutas = new Map<string, { codigo: string; destino: string; agencia: string }>()

@@ -1,6 +1,6 @@
 import { distanceMeters } from "@/lib/geo"
 import { findPlaces, type TransmilenioData } from "@/lib/routes"
-import { estacionesGtfsDeLugar, indiceVigente, rutasGtfsDeRuta, type IndiceGtfs, type RutaIndice } from "@/lib/gtfs-indice"
+import { AGENCIAS_DEL_CATALOGO, SISTEMAS, estacionesGtfsDeLugar, indiceVigente, rutasGtfsDeRuta, type IndiceGtfs, type RutaIndice } from "@/lib/gtfs-indice"
 import { saludDeFeeds, type SaludFeed } from "@/lib/gtfs-rt"
 import { normalize } from "@/lib/text"
 import {
@@ -55,18 +55,39 @@ export type Contexto = {
 
 export type Error503 = "indice-vencido" | "feed-no-disponible"
 
-/** Ids de GTFS de una ruta escrita como el catálogo («8 G», «B10») o como el GTFS («8-1», «166»). */
-export function resolverRuta(codigo: string, { data, i }: Pick<Contexto, "data" | "i">): RutaIndice[] {
-  const limpio = codigo.replace(/\s+/g, "").toUpperCase()
-  const catalogada = data.routes.find((r) => r.code.replace(/\s+/g, "").toUpperCase() === limpio)
+export type RutaResuelta =
+  | { tipo: "ok"; rutas: RutaIndice[]; sistema: string; tambienEn: string[] }
+  | { tipo: "ambigua"; opciones: string[] }
+  | { tipo: "desconocida" }
+
+const sistemaDe = (r: RutaIndice) => SISTEMAS[r.agencia] ?? "otro"
+const claveDeCodigo = (codigo: string) => codigo.replace(/\s+/g, "").toUpperCase()
+
+/**
+ * Ids de GTFS de una ruta escrita como el catálogo («8 G», «B10») o como el GTFS («8-1», «166»), dentro de UN
+ * sistema. Un código del catálogo se enlaza solo con troncales y duales; uno que no es del catálogo y existe en
+ * varios sistemas se resuelve al troncal/dual si lo hay —y se dice que existe también en los otros (`tambienEn`)—
+ * y, si no, se pregunta. Los sistemas nunca se mezclan.
+ */
+export function resolverRuta(codigo: string, { data, i }: Pick<Contexto, "data" | "i">): RutaResuelta {
+  const limpio = claveDeCodigo(codigo)
+  const delMismoCodigo = i.indice.rutas.filter((r) => claveDeCodigo(r.codigo) === limpio)
+  const resolver = (rutas: RutaIndice[]): RutaResuelta => {
+    const sistema = sistemaDe(rutas[0])
+    const tambienEn = [...new Set(delMismoCodigo.map(sistemaDe).filter((s) => s !== sistema && !rutas.some((r) => sistemaDe(r) === s)))]
+    return { tipo: "ok", rutas, sistema, tambienEn }
+  }
+  const catalogada = data.routes.find((r) => claveDeCodigo(r.code) === limpio)
   if (catalogada) {
     const enlazadas = rutasGtfsDeRuta(catalogada, data, i.indice)
-    if (enlazadas.length > 0) return enlazadas
+    if (enlazadas.length > 0) return resolver(enlazadas)
   }
-  const directas = i.indice.rutas.filter((r) => r.codigo.replace(/\s+/g, "").toUpperCase() === limpio)
-  // Los códigos se repiten entre sistemas (C25 troncal y C25 de otro operador): gana el troncal o dual.
-  const troncales = directas.filter((r) => r.agencia === "1" || r.agencia === "6")
-  return troncales.length > 0 ? troncales : directas
+  if (delMismoCodigo.length === 0) return { tipo: "desconocida" }
+  const sistemas = [...new Set(delMismoCodigo.map(sistemaDe))]
+  if (sistemas.length === 1) return resolver(delMismoCodigo)
+  const delCatalogo = delMismoCodigo.filter((r) => AGENCIAS_DEL_CATALOGO.has(r.agencia))
+  if (delCatalogo.length > 0 && new Set(delCatalogo.map(sistemaDe)).size === 1) return resolver(delCatalogo)
+  return { tipo: "ambigua", opciones: sistemas.map((s) => `${codigo} (${s})`) }
 }
 
 export type ParadaResuelta = { nombre: string; ids: Set<string> }
@@ -136,16 +157,18 @@ type Falla = { ok: false; estado: 400 | 404 | 409 | 503; error: string; opciones
 export type Resultado<T> = ({ ok: true } & T) | Falla
 const falla = (estado: Falla["estado"], error: string, opciones?: string[]): Falla => ({ ok: false, estado, error, ...(opciones ? { opciones } : {}) })
 /** Falla de una resolución de parada que no dio `ok`. */
+const fallaDeRuta = (r: Exclude<RutaResuelta, { tipo: "ok" }>): Falla => (r.tipo === "ambigua" ? falla(409, "ruta-ambigua", r.opciones) : falla(404, "ruta-desconocida"))
 const fallaDeParada = (r: Exclude<ResolucionParada, { tipo: "ok" }>): Falla => (r.tipo === "ambigua" ? falla(409, "parada-ambigua", r.opciones) : falla(404, "parada-desconocida"))
 
 export function consultarLlegadas(ctx: Contexto, { parada, ruta, max = 6 }: { parada: string; ruta?: string; max?: number }): Resultado<RespuestaLlegadas> {
   const resolucion = resolverParada(parada, ctx)
   if (resolucion.tipo !== "ok") return fallaDeParada(resolucion)
   const lugar = resolucion.parada
-  const rutas = ruta ? resolverRuta(ruta, ctx) : undefined
-  if (ruta && rutas!.length === 0) return falla(404, "ruta-desconocida")
+  const resRuta = ruta ? resolverRuta(ruta, ctx) : undefined
+  if (resRuta && resRuta.tipo !== "ok") return fallaDeRuta(resRuta)
+  const rutas = resRuta?.rutas
   const meta = metaDe(ctx)
-  const base = { ok: true as const, operacion: "llegadas" as const, meta, parada: lugar.nombre, ruta: ruta ?? null }
+  const base = { ok: true as const, operacion: "llegadas" as const, meta, parada: lugar.nombre, ruta: ruta ?? null, sistema: resRuta?.sistema ?? null, tambienEn: resRuta?.tambienEn ?? [] }
   if (rutas && rutasPorParada(ctx.i.indice, lugar.ids, rutas.map((r) => r.id)).length === 0) return { ...base, motivo: "ruta-no-pasa-por-parada", llegadas: [] }
   if (meta.detenido) return { ...base, motivo: "feed-detenido", llegadas: [] }
   const llegadas = llegadasEnParada(ctx.i, { paradas: lugar.ids, rutas: rutas?.map((r) => r.id), max })
@@ -153,10 +176,11 @@ export function consultarLlegadas(ctx: Contexto, { parada, ruta, max = 6 }: { pa
 }
 
 export function consultarBusesRuta(ctx: Contexto, { ruta }: { ruta: string }): Resultado<RespuestaBusesRuta> {
-  const rutas = resolverRuta(ruta, ctx)
-  if (rutas.length === 0) return falla(404, "ruta-desconocida")
+  const res = resolverRuta(ruta, ctx)
+  if (res.tipo !== "ok") return fallaDeRuta(res)
+  const rutas = res.rutas
   const { buses, sinUbicar } = busesDeRutas(ctx.i, rutas.map((r) => r.id))
-  return { ok: true, operacion: "buses-ruta", meta: metaDe(ctx), ruta, destinos: [...new Set(rutas.map((r) => r.destino))], buses, sinUbicar }
+  return { ok: true, operacion: "buses-ruta", meta: metaDe(ctx), ruta, sistema: res.sistema, tambienEn: res.tambienEn, destinos: [...new Set(rutas.map((r) => r.destino))], buses, sinUbicar }
 }
 
 export function consultarProximasParadasBus(ctx: Contexto, { bus, max = 5 }: { bus: string; max?: number }): Resultado<{ operacion: "proximas-paradas-bus"; meta: Meta; bus: { id: string; etiqueta: string; codigo: string; destino: string; edad: number }; paradas: ParadaDeBus[] }> {
@@ -184,9 +208,10 @@ export function consultarParadasCercanas(ctx: Contexto, { lat, lng, radio, max =
   }
 }
 
-export function consultarAlertas(ctx: Contexto, { ruta, parada }: { ruta?: string; parada?: string }): Resultado<{ operacion: "alertas"; meta: Meta; parada: string | null; alertas: (Omit<AlertaVigente, "rutas" | "paradas"> & { rutas: string[] })[] }> {
-  const rutas = ruta ? resolverRuta(ruta, ctx) : undefined
-  if (ruta && rutas!.length === 0) return falla(404, "ruta-desconocida")
+export function consultarAlertas(ctx: Contexto, { ruta, parada }: { ruta?: string; parada?: string }): Resultado<{ operacion: "alertas"; meta: Meta; parada: string | null; sistema: string | null; tambienEn: string[]; alertas: (Omit<AlertaVigente, "rutas" | "paradas"> & { rutas: string[] })[] }> {
+  const resRuta = ruta ? resolverRuta(ruta, ctx) : undefined
+  if (resRuta && resRuta.tipo !== "ok") return fallaDeRuta(resRuta)
+  const rutas = resRuta?.rutas
   const resolucion = parada ? resolverParada(parada, ctx) : undefined
   if (resolucion && resolucion.tipo !== "ok") return fallaDeParada(resolucion)
   const lugar = resolucion?.parada
@@ -196,6 +221,8 @@ export function consultarAlertas(ctx: Contexto, { ruta, parada }: { ruta?: strin
     operacion: "alertas",
     meta: metaDe(ctx),
     parada: lugar?.nombre ?? null,
+    sistema: resRuta?.sistema ?? null,
+    tambienEn: resRuta?.tambienEn ?? [],
     alertas: vigentes.map(({ paradas: _paradas, rutas: ids, ...resto }) => ({ ...resto, rutas: [...new Set(ids.map((id) => rutaDeIndice(ctx.i.indice, id)?.codigo ?? id))] })),
   }
 }
@@ -206,11 +233,11 @@ export type CuerpoTiempoReal =
   | (RespuestaParadasCercanas)
   | { operacion: "proximas-paradas-bus"; meta: Meta; bus: unknown; paradas: ParadaDeBus[] }
   | { operacion: "buses-cercanos"; meta: Meta; buses: unknown[] }
-  | { operacion: "alertas"; meta: Meta; parada: string | null; alertas: unknown[] }
+  | { operacion: "alertas"; meta: Meta; parada: string | null; sistema: string | null; tambienEn: string[]; alertas: unknown[] }
   | { operacion: "buscar-paradas"; meta: Meta; paradas: ParadaEncontrada[] }
   | { operacion: "estado-sistema"; meta: Meta; sistema: EstadoSistema }
-  | { operacion: "horario-ruta"; meta: Meta; horarios: HorarioDeRuta[] }
-  | { operacion: "cancelados-hoy"; meta: Meta; cancelados: CanceladosHoy | null }
+  | { operacion: "horario-ruta"; meta: Meta; sistema: string; tambienEn: string[]; horarios: HorarioDeRuta[] }
+  | { operacion: "cancelados-hoy"; meta: Meta; sistema: string | null; tambienEn: string[]; cancelados: CanceladosHoy | null }
   | { operacion: "salud-feeds"; meta: Meta; feeds: SaludFeed[] }
 
 const sinOk = <T extends { ok: true }>(r: T): Omit<T, "ok"> => {
@@ -243,14 +270,14 @@ export function ejecutarConsulta(ctx: Contexto, p: PeticionTiempoReal): { estado
     case "estado-sistema":
       return { estado: 200, cuerpo: { operacion: "estado-sistema", meta, sistema: estadoSistema(ctx.i) } }
     case "horario-ruta": {
-      const rutas = resolverRuta(p.ruta, ctx)
-      if (rutas.length === 0) return { estado: 404, cuerpo: { error: "ruta-desconocida" } }
-      return { estado: 200, cuerpo: { operacion: "horario-ruta", meta, horarios: horarioDeRutas(ctx.i.indice, rutas.map((r) => r.id), ctx.i.ahora) } }
+      const res = resolverRuta(p.ruta, ctx)
+      if (res.tipo !== "ok") return vencida(fallaDeRuta(res))
+      return { estado: 200, cuerpo: { operacion: "horario-ruta", meta, sistema: res.sistema, tambienEn: res.tambienEn, horarios: horarioDeRutas(ctx.i.indice, res.rutas.map((r) => r.id), ctx.i.ahora) } }
     }
     case "cancelados-hoy": {
-      const rutas = p.ruta ? resolverRuta(p.ruta, ctx) : undefined
-      if (p.ruta && rutas!.length === 0) return { estado: 404, cuerpo: { error: "ruta-desconocida" } }
-      return { estado: 200, cuerpo: { operacion: "cancelados-hoy", meta, cancelados: canceladosHoy(ctx.i, rutas?.map((r) => r.id)) } }
+      const res = p.ruta ? resolverRuta(p.ruta, ctx) : undefined
+      if (res && res.tipo !== "ok") return vencida(fallaDeRuta(res))
+      return { estado: 200, cuerpo: { operacion: "cancelados-hoy", meta, sistema: res?.sistema ?? null, tambienEn: res?.tambienEn ?? [], cancelados: canceladosHoy(ctx.i, res?.rutas.map((r) => r.id)) } }
     }
   }
 }

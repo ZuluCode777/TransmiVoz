@@ -226,6 +226,8 @@ const ETIQUETA_BUS = /(?:^|[^a-z0-9])([a-z]{1,2}\d{2}-\d{3,5}|[a-z]\d{4,5})(?![a
 const BUS_NUMERICO = /\b(?:bus|buses|vehiculo|articulado|biarticulado)\s+(?:numero\s+)?(\d{4,6})\b/
 /** Lo que sigue a «por», «en», «a», «hasta» o «para» al final de la frase: la parada o estación nombrada. */
 const PARADA_ESCRITA = /\b(?:por|en|a|hasta|para)\s+(?:la\s+|el\s+)?(?:parada\s+|estacion\s+)?([a-z0-9][a-z0-9 ]*)$/
+/** Lo que suele cerrar una pregunta y no es parte del nombre: «por favor», «hoy», «ahora». */
+const CIERRE_DE_FRASE = /(?:\s+(?:por favor|gracias|hoy|ahora|manana|otra vez|en este momento|esta (?:noche|tarde|manana)))+$/
 const NO_ES_PARADA = /^(?:ruta|rutas|bus|buses|servicio|via|circulacion|la|el|mi|aqui|alli|ahi|casa|estacion|parada|bogota|el dia|este momento|ahora|hoy)\b/
 const RUTA_ESCRITA = /\b(?:ruta|bus|buses|servicio)\s+([a-z]{0,2}\d{1,3}[a-z]{0,2}(?:-\d{1,2}[a-z]?)?)(?![a-z0-9-])/i
 const SCHEDULE = ["horario", "horarios", "a que hora", "hora", "abre", "cierra", "opera", "funciona"]
@@ -318,10 +320,28 @@ function rutaDeFrase(text: string, data: TransmilenioData): string | undefined {
  * decide si existe. Nada si lo que sigue a la preposición es una ruta, un bus o una palabra suelta.
  */
 function paradaEscrita(t: string, ruta: string | undefined): string | undefined {
-  const dicha = PARADA_ESCRITA.exec(t)?.[1]?.trim()
+  const dicha = PARADA_ESCRITA.exec(t)?.[1]?.trim().replace(CIERRE_DE_FRASE, "")
   if (!dicha || NO_ES_PARADA.test(dicha)) return undefined
   if (ruta && dicha.replace(/ /g, "") === normalize(ruta).replace(/ /g, "")) return undefined
   return dicha
+}
+
+/**
+ * Nombre con el que viaja una parada dicha por la persona (o el modelo). Se CONSERVA lo que dijo: «Br. El Virrey»
+ * no se vuelve «Virrey» por parecerse a una estación del catálogo troncal. Solo se usa el nombre del catálogo
+ * cuando lo dicho es una abreviatura suya («la 100» → «Calle 100»: todas sus palabras son del nombre) o trae
+ * palabras de más al final («Calle 100 hacia el norte»). El servidor resuelve el nombre contra todo el GTFS.
+ */
+export function nombreDeParadaDicho(dicho: string, data: TransmilenioData, frase: string = dicho): string {
+  const palabras = normalize(dicho).split(" ").filter(Boolean)
+  // El catálogo reconoce «la 100» dentro de la frase, no suelta.
+  const [lugar] = findPlaces(frase, data)
+  if (lugar) {
+    const delLugar = normalize(lugar.name).split(" ")
+    if (palabras.every((p) => delLugar.includes(p))) return lugar.name
+    if (delLugar.every((p, n) => palabras[n] === p)) return lugar.name
+  }
+  return dicho
 }
 
 /**
@@ -334,7 +354,8 @@ export function interpretarTiempoReal(text: string, data: TransmilenioData): Con
   const etiqueta = ETIQUETA_BUS.exec(text)?.[1] ?? BUS_NUMERICO.exec(t)?.[1]
   if (etiqueta) return { tema: "bus", bus: etiqueta.toUpperCase() }
   const ruta = rutaDeFrase(text, data)
-  const parada = findPlaces(text, data)[0]?.name ?? paradaEscrita(t, ruta)
+  const dicha = paradaEscrita(t, ruta)
+  const parada = dicha ? nombreDeParadaDicho(dicha, data, text) : findPlaces(text, data)[0]?.name
   if (hasPhrase(t, CANCELADOS)) return { tema: "cancelados", ruta }
   if (hasPhrase(t, NOVEDADES)) return { tema: "novedades", ruta, parada }
   if (hasPhrase(t, ESTADO_DATOS)) return { tema: "estado_datos" }
@@ -363,7 +384,14 @@ export function interpretarTiempoReal(text: string, data: TransmilenioData): Con
 export function consultaTiempoRealDeModelo(text: string, data: TransmilenioData, entidades: { ruta?: string; parada?: string }): ConsultaTiempoReal {
   const base = interpretarTiempoReal(text, data) ?? { tema: "llegadas" as const }
   const ruta = entidades.ruta ?? ("ruta" in base ? base.ruta : undefined)
-  const parada = entidades.parada ?? ("parada" in base ? base.parada : undefined)
+  // Manda lo que la persona escribió; el modelo solo completa lo que dijo (si no aparece en la frase, es invento del modelo).
+  const delTexto = new Set(normalize(text).split(" "))
+  const delModelo = entidades.parada && normalize(entidades.parada).split(" ").every((p) => delTexto.has(p)) ? nombreDeParadaDicho(entidades.parada, data, text) : undefined
+  let parada = ("parada" in base ? base.parada : undefined) ?? delModelo
+  // Lo dicho puede ser una abreviatura que solo el modelo completa («la 100» → «Calle 100»): se acepta si el
+  // nombre del catálogo que da el modelo contiene TODAS las palabras dichas. «Br. El Virrey» no cabe en «Virrey».
+  const [delCatalogo] = entidades.parada ? findPlaces(entidades.parada, data) : []
+  if (parada && delCatalogo && normalize(parada).split(" ").every((p) => normalize(delCatalogo.name).split(" ").includes(p))) parada = delCatalogo.name
   switch (base.tema) {
     case "llegadas":
       return { tema: ruta && !parada && hasPhrase(normalize(text), BUSES_RUTA) ? "buses" : "llegadas", ruta, parada } as ConsultaTiempoReal

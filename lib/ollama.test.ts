@@ -61,10 +61,11 @@ test(
       type: "tiempo_real",
       consulta: { tema: "llegadas", ruta: "B10", parada: "Calle 100" },
     })
-    // Una frase de novedades conserva su tema aunque el modelo la llame realtime.
+    // Una frase de novedades conserva su tema aunque el modelo la llame realtime. La estación que el modelo
+    // añade («Calle 100») no la dijo la persona: no entra.
     assert.deepEqual(await parseIntentWithOllama("¿hay desvíos en el B10?", data), {
       type: "tiempo_real",
-      consulta: { tema: "novedades", ruta: "B10", parada: "Calle 100" },
+      consulta: { tema: "novedades", ruta: "B10", parada: undefined },
     })
     // «dónde viene el B10» es dónde está la ruta, no una llegada a una estación.
     assert.deepEqual(await parseIntentWithOllama("dónde viene el B10", { ...data }), {
@@ -75,7 +76,7 @@ test(
 )
 
 test(
-  "realtime: una ruta o estación inventada por el modelo no llega a la consulta",
+  "realtime: una ruta inventada por el modelo no llega a la consulta, y una estación que la persona no dijo tampoco",
   withModelOutput(extraction({ intent: "realtime", routeCode: "Z999", destination: "Narnia" }), async () => {
     assert.deepEqual(await parseIntentWithOllama("cuándo llega el bus", data), { type: "tiempo_real", consulta: { tema: "llegadas", ruta: undefined, parada: undefined } })
   }),
@@ -85,5 +86,24 @@ test(
   "R1·8 la espera que recibe del presupuesto puede ser fraccionaria (AbortSignal.timeout exige un entero)",
   withModelOutput(extraction({ intent: "greeting" }), async () => {
     assert.deepEqual(await parseIntentWithOllama("hola", data, 2_073.505213), { type: "greeting" })
+  }),
+)
+
+test(
+  "R2·2 el modelo: el nombre que dijo la persona manda sobre el «Virrey» del catálogo (llegadas y novedades)",
+  withModelOutput(extraction({ intent: "realtime", routeCode: "", destination: "Virrey" }), async () => {
+    assert.deepEqual(await parseIntentWithOllama("¿cuándo pasa la ruta 166 por Br. El Virrey?", data), {
+      type: "tiempo_real",
+      consulta: { tema: "llegadas", ruta: "166", parada: "br el virrey" },
+    })
+    assert.deepEqual(await parseIntentWithOllama("¿hay novedades en Br. El Virrey?", data), {
+      type: "tiempo_real",
+      consulta: { tema: "novedades", ruta: undefined, parada: "br el virrey" },
+    })
+    // Sin que la persona la haya nombrado de forma extraíble, la del modelo solo vale si aparece en su frase.
+    assert.deepEqual(await parseIntentWithOllama("¿hay novedades por el Virrey?", data), {
+      type: "tiempo_real",
+      consulta: { tema: "novedades", ruta: undefined, parada: "Virrey" },
+    })
   }),
 )

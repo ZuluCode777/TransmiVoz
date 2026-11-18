@@ -115,6 +115,9 @@ export const RespuestaLlegadasSchema = z.object({
   meta: MetaSchema,
   parada: z.string(),
   ruta: z.string().nullable(),
+  /** Sistema del servicio consultado («troncal») y otros sistemas donde el mismo código existe, que NO se mezclan. */
+  sistema: z.string().nullable(),
+  tambienEn: z.array(z.string()),
   /** Por qué no hay llegadas, si no las hay. */
   motivo: z.enum(["ruta-no-pasa-por-parada", "sin-buses", "feed-detenido"]).nullable(),
   llegadas: z.array(LlegadaSchema),
@@ -125,6 +128,8 @@ export const RespuestaBusesRutaSchema = z.object({
   operacion: z.literal("buses-ruta"),
   meta: MetaSchema,
   ruta: z.string(),
+  sistema: z.string().nullable(),
+  tambienEn: z.array(z.string()),
   destinos: z.array(z.string()),
   buses: z.array(BusEnViaSchema),
   sinUbicar: z.number(),
