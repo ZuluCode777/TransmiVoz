@@ -9,6 +9,7 @@
     "start": "next start",
     "test": "node --import ./test/register.mjs --test \"lib/**/*.test.ts\"",
     "sync:transmilenio": "node --import ./test/register.mjs scripts/sync-transmilenio.ts",
+    "sync:gtfs-indice": "node --import ./test/register.mjs scripts/sync-gtfs-indice.ts",
     "sync:metro-cartografia": "node --import ./test/register.mjs scripts/sync-metro-cartografia.ts",
     "analisis:metro-cartografia": "node --import ./test/register.mjs scripts/analisis-metro-cartografia.ts",
     "migrar:paradas-sentido": "node --import ./test/register.mjs scripts/migrar-paradas-sentido.ts",
@@ -16,6 +17,7 @@
     "verificar": "node scripts/verificar.mjs"
   },
   "dependencies": {
+    "gtfs-realtime-bindings": "^3.0.0",
     "leaflet": "^1.9.4",
     "lucide-react": "^1.16.0",
     "next": "16.3.3",

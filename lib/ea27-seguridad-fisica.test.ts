@@ -44,7 +44,7 @@ const POSITIVAS = [
 const NEGATIVAS: [string, Intent["type"]][] = [
   ["cómo cruzo a la estación Ricaurte", "trip"],
   ["dónde está el puente para cruzar a la estación", "unknown"],
-  ["cuándo llega el B23", "route_info"],
+  ["cuándo llega el B23", "tiempo_real"], // antes «route_info»: ahora es una pregunta en vivo
   ["quiero subir al metro en la calle 72", "metro"],
   ["cómo llego de Ricaurte a Calle 72", "trip"],
   ["dónde estoy", "gps"],

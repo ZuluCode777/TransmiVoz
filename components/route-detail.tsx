@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react"
 import { Bus, Clock, Heart, Volume2 } from "lucide-react"
+import { BusesEnVivo, LlegadasEnVivo } from "@/components/en-vivo"
 import { ScreenHeader } from "@/components/screen-header"
 import { TransitMap, type MapMarker } from "@/components/transit-map"
 import { useSpeech } from "@/hooks/use-speech"
@@ -57,6 +58,8 @@ const describe = (route: BusRoute, data: TransmilenioData, now: Date = new Date(
 /** Recorrido de una ruta en el mapa, con sus estaciones y horarios. */
 export function RouteDetail({ route, data, favorite, onToggleFavorite, onBack }: RouteDetailProps) {
   const { speak } = useSpeech()
+  // Estación donde espera la persona, para ver cuándo llega el próximo bus (vacía: solo los buses en vía).
+  const [espera, setEspera] = useState("")
   // El calendario y los permisos pueden vencer aunque el catálogo no cambie.
   const [ahora, setAhora] = useState(() => new Date())
   useEffect(() => {
@@ -130,9 +133,31 @@ export function RouteDetail({ route, data, favorite, onToggleFavorite, onBack }:
         </button>
       </div>
 
+      <BusesEnVivo ruta={route.code} />
+
+      <div className="mt-4 flex flex-col gap-2">
+        <label htmlFor="espera-en-vivo" className="text-lg font-bold">
+          ¿En qué estación esperas?
+        </label>
+        <select
+          id="espera-en-vivo"
+          value={espera}
+          onChange={(e) => setEspera(e.target.value)}
+          className="min-h-14 rounded-2xl border-3 border-border bg-card px-3 text-lg"
+        >
+          <option value="">Elige una estación para ver el próximo bus</option>
+          {route.stops.map((stop, i) => (
+            <option key={`${stop}-${i}`} value={stop}>
+              {stop}
+            </option>
+          ))}
+        </select>
+      </div>
+      {espera && <LlegadasEnVivo parada={espera} ruta={route.code} />}
+
       <h3 className="mt-6 flex items-center gap-2 text-xl font-bold">
         <Clock className="size-6 text-brand-ink" aria-hidden="true" />
-        Horario
+        Horario programado
       </h3>
       <p className="text-base text-muted-foreground">
         {estadoCal === "opera"

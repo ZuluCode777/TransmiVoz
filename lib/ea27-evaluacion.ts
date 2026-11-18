@@ -29,6 +29,7 @@ const TIPOS: Record<Intent["type"], true> = {
   trip: true,
   trip_missing_destination: true,
   unsupported: true,
+  tiempo_real: true,
   metro: true,
   seguridad_fisica: true,
   unknown: true,
@@ -40,7 +41,7 @@ const EsperadoSchema = z.object({
   origin: z.string().optional(),
   destination: z.string().optional(),
   routeCode: z.string().optional(),
-  /** `unsupported`: «tarifas» o «tiempo_real». */
+  /** `unsupported`: «tarifas». */
   topic: z.string().optional(),
   /** `metro`: tipo de consulta y sus datos. */
   tipo: z.string().optional(),
@@ -118,6 +119,8 @@ function entidadesOk(esperado: Esperado, intent: Intent, data: TransmilenioData)
       return intent.routeCode === esperado.routeCode
     case "unsupported":
       return intent.topic === esperado.topic
+    case "tiempo_real":
+      return esperado.tema === undefined || intent.consulta.tema === esperado.tema
     case "metro": {
       const c = intent.consulta
       return (

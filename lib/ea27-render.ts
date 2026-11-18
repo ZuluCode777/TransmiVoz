@@ -35,7 +35,7 @@ const FIJAS: Intent[] = [
   { type: "help" },
   { type: "cancel" },
   { type: "unsupported", topic: "tarifas" },
-  { type: "unsupported", topic: "tiempo_real" },
+  { type: "tiempo_real", consulta: { tema: "llegadas" } },
   { type: "unknown" },
 ]
 

@@ -23,6 +23,8 @@ import { fetchTransmilenio, TransmilenioDataSchema, VIGENCIA_CATALOGO_VIVO_MS, t
  */
 const LIVE_TTL_MS = VIGENCIA_CATALOGO_VIVO_MS
 const RETRY_MS = 5 * 60 * 1000
+/** Cuánto se espera el catálogo en vivo cuando no hay ninguno en memoria, antes de usar la copia guardada. */
+export const ESPERA_ARRANQUE_MS = 2_500
 
 /** Catálogo vigente y hasta cuándo se considera fresco. */
 let cache: { data: TransmilenioData; expires: number } | null = null
@@ -85,5 +87,10 @@ export async function getTransmilenioData(): Promise<TransmilenioData> {
     void renovarEnVivo()
     return cache.data
   }
-  return renovarEnVivo()
+  // Arranque en frío: la consulta en vivo puede tardar hasta `LAYER_TIMEOUT_MS` (15 s), más de lo
+  // que espera la web. Pasado `ESPERA_ARRANQUE_MS` se responde con la copia guardada y la consulta
+  // sigue aparte: si termina bien, queda como catálogo vigente para las siguientes.
+  let reloj: ReturnType<typeof setTimeout> | undefined
+  const copia = new Promise<TransmilenioData>((ok) => (reloj = setTimeout(() => ok(copiaGuardada()), ESPERA_ARRANQUE_MS)))
+  return Promise.race([renovarEnVivo(), copia]).finally(() => clearTimeout(reloj))
 }

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Navigation, MapPin, Volume2, Map, LocateFixed } from "lucide-react"
 import { useSpeech } from "@/hooks/use-speech"
+import { ParadasCercanasEnVivo } from "@/components/en-vivo"
 import { ScreenHeader } from "@/components/screen-header"
 import { TransitMap, type MapMarker } from "@/components/transit-map"
 import { distanceMeters, spokenDistance } from "@/lib/geo"
@@ -455,6 +456,9 @@ export function AuditoryGps({ data, onBack }: AuditoryGpsProps) {
             })}
           </ul>
           )}
+
+          {/* Las coordenadas se redondean a ~110 m: basta para las paradas cercanas y evita una consulta por cada lectura del GPS. */}
+          <ParadasCercanasEnVivo lat={Number(ubicacionActual.lat.toFixed(3))} lng={Number(ubicacionActual.lng.toFixed(3))} />
         </>
       )}
     </section>

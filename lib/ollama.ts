@@ -1,5 +1,5 @@
 import { z } from "zod"
-import type { Intent } from "@/lib/local-agent"
+import { consultaTiempoRealDeModelo, type Intent } from "@/lib/local-agent"
 import { findPlaces, findRouteByCode, shortName, type TransmilenioData } from "@/lib/routes"
 
 /**
@@ -74,7 +74,8 @@ const MODEL_INTENT_HELP: Record<(typeof MODEL_INTENTS)[number], string> = {
   schedule: "pregunta el horario de una ruta (pon su código en routeCode).",
   trip: "quiere ir a una estación. destination es obligatorio; origin solo si lo dice.",
   fares: "pregunta por tarifas o pasajes.",
-  realtime: "pregunta cuándo llega un bus.",
+  realtime:
+    "pregunta cuándo llega o pasa un bus, dónde viene una ruta, cuántos buses hay, si hay novedades o desvíos, o qué buses hay cerca (pon la ruta en routeCode y la estación en destination).",
   unknown: "cualquier otra cosa, incluida toda pregunta de seguridad física (si puede cruzar, subir, o si el camino, el semáforo o el andén están libres).",
 }
 
@@ -221,7 +222,7 @@ export async function ollamaStatus(): Promise<{ reachable: boolean; hasModel: bo
  * modelo no cuadra con los datos, y falla si Ollama no responde o responde algo
  * que no es suyo; en los dos casos quien llama usa las reglas.
  */
-export async function parseIntentWithOllama(text: string, data: TransmilenioData): Promise<Intent | null> {
+export async function parseIntentWithOllama(text: string, data: TransmilenioData, esperaMs: number = TIMEOUT_MS): Promise<Intent | null> {
   let contenido: string
   try {
     const response = await fetchOllama("/api/chat", {
@@ -238,7 +239,7 @@ export async function parseIntentWithOllama(text: string, data: TransmilenioData
           { role: "user", content: text },
         ],
       }),
-      signal: AbortSignal.timeout(TIMEOUT_MS),
+      signal: AbortSignal.timeout(Math.floor(Math.min(esperaMs, TIMEOUT_MS))),
     })
     if (!response.ok) throw new Error(`Ollama: HTTP ${response.status}`)
     const chat = ChatResponseSchema.safeParse(await response.json())
@@ -278,7 +279,8 @@ export async function parseIntentWithOllama(text: string, data: TransmilenioData
     case "fares":
       return { type: "unsupported", topic: "tarifas" }
     case "realtime":
-      return { type: "unsupported", topic: "tiempo_real" }
+      // El modelo solo aporta la ruta (validada) y, si la dijo la persona, el nombre de la parada tal cual (lo valida el servidor contra todo el GTFS); el tema lo lee la misma regla que las reglas.
+      return { type: "tiempo_real", consulta: consultaTiempoRealDeModelo(text, data, { ruta: route, parada: destination || undefined }) }
     default:
       return { type: intent }
   }
