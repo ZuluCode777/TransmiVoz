@@ -14,8 +14,9 @@ import {
 import type { Meta } from "@/lib/contrato-tiempo-real"
 import { indiceVigente } from "@/lib/gtfs-indice"
 import { saludDeFeeds } from "@/lib/gtfs-rt"
+import { enTiempo, haceTiempo, plural, textoDestino, textoRetraso } from "@/lib/texto-tiempo-real"
 import { tomarContexto, type Necesidades } from "@/lib/instantanea-servidor"
-import { busesCercanos, buscarParadas, cabeceraVieja, canceladosHoy, estadoSistema, horarioDeRutas, textoDestino, type Llegada } from "@/lib/tiempo-real"
+import { busesCercanos, buscarParadas, cabeceraVieja, canceladosHoy, estadoSistema, horarioDeRutas, type Llegada } from "@/lib/tiempo-real"
 import { ubicacionVigente } from "@/lib/ubicacion"
 
 /**
@@ -50,21 +51,6 @@ export function necesidadesDeConsulta(consulta: ConsultaTiempoReal): Necesidades
   return NECESIDADES[consulta.tema]
 }
 
-const plural = (n: number, uno: string, varios: string) => `${n.toLocaleString("es-CO")} ${n === 1 ? uno : varios}`
-
-/** «en unos 4 minutos», «en menos de un minuto». */
-export function enTiempo(segundos: number): string {
-  if (segundos < 60) return "en menos de un minuto"
-  const m = Math.round(segundos / 60)
-  return m === 1 ? "en un minuto" : `en unos ${m} minutos`
-}
-
-/** «hace 40 segundos», «hace 3 minutos». */
-export function haceTiempo(segundos: number): string {
-  if (segundos < 90) return `hace ${plural(Math.max(1, Math.round(segundos)), "segundo", "segundos")}`
-  return `hace ${plural(Math.round(segundos / 60), "minuto", "minutos")}`
-}
-
 const edadDato = (meta: Meta) => (meta.edadDatosS === null ? "" : ` Datos de ${haceTiempo(meta.edadDatosS)}.`)
 const avisoCopia = (meta: Meta) => (meta.copiaObsoleta ? " No pude actualizar y uso la última copia." : "")
 
@@ -86,8 +72,7 @@ function horarioDeRespaldo(codigo: string | undefined, data: TransmilenioData): 
 
 /** Una llegada hablada: «en unos 4 minutos» y, si el retraso reportado es notable, «con unos 3 minutos de retraso reportado». */
 function llegadaHablada(l: Llegada): string {
-  const retraso = l.retraso !== null && Math.abs(l.retraso) >= 180 ? `, con unos ${Math.round(Math.abs(l.retraso) / 60)} minutos de ${l.retraso > 0 ? "retraso" : "adelanto"} reportado` : ""
-  return `${enTiempo(l.segundos)}${retraso}`
+  return `${enTiempo(l.segundos)}${textoRetraso(l.retraso)}`
 }
 
 /** Agrupa por ruta y sentido, en el orden de la primera llegada de cada grupo. */

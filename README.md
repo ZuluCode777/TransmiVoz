@@ -68,8 +68,46 @@ TransMilenio esté caído. Para actualizar la copia:
 pnpm sync:transmilenio
 ```
 
-TransMilenio no publica la posición de los buses en tiempo real, así que la app
-da horarios, no tiempos de llegada.
+## Tiempo real
+
+Desde noviembre de 2026 TransMilenio S.A. publica feeds GTFS Realtime oficiales y
+sin llave en `https://gtfs.transmilenio.gov.co/` (`positions.pb`, `alerts.pb` y
+`tripupdates.pb`). La app los lee en el servidor (`lib/gtfs-rt.ts`, con el paquete
+oficial `gtfs-realtime-bindings`) y los combina con un índice del GTFS estático
+(`data/gtfs-indice.json`) para dar llegadas, buses en vía, buses y paradas cerca,
+novedades, cancelados y estado del sistema. Los tiempos son **estimados**: cada
+respuesta dice «estimado» y la edad del dato.
+
+- **Dónde se usa.** En el asistente (`/api/agent`, que ya usan la web y el iPhone:
+  «¿cuándo pasa el B10 por Calle 100?», «¿dónde viene la 8 G?», «¿hay novedades en
+  el B10?»), en `POST /api/tiempo-real` (JSON, tras el mismo HTTP Basic; contrato en
+  `lib/contrato-tiempo-real.ts`) y en las pantallas de ruta, viaje y GPS.
+- **Cómo estima.** Medido contra el feed, el `stop_id` y el `current_stop_sequence` de
+  `positions.pb` no corresponden a la posición del bus, pero su latitud y longitud
+  sí caen sobre el trazado de su ruta. Por eso el bus se ubica por geometría sobre
+  las paradas de su ruta y la llegada sale de los tiempos programados entre paradas
+  (`lib/tiempo-real.ts`). El retraso de `tripupdates.pb` corrige las salidas
+  programadas y se muestra junto a cada bus; los viajes cancelados se descartan y
+  los añadidos cuentan.
+- **Frescura.** Cada feed se guarda 15 s en memoria (60 s `tripupdates`, que pesa
+  8,8 MB y se refresca fuera de la petición). Un feed con la cabecera de más de 300 s
+  está detenido y un bus que no reporta hace más de 300 s no cuenta; en los dos casos
+  la respuesta lo dice y ofrece el horario publicado. Si una lectura falla se usa la
+  última copia, marcada como tal.
+- **El índice.** `pnpm sync:gtfs-indice` recorre `GTFS.zip` (~119 MB, no se versiona
+  ni se baja en tiempo de ejecución) y regenera `data/gtfs-indice.json`: rutas de toda
+  la red (troncal, dual, alimentador, zonal y TransMiCable), paradas, patrones de
+  referencia, calendario y salidas por hora. Caduca a los 31 días
+  (`MAX_EVIDENCIA_DIAS`): vencido, el asistente dice que sus datos de rutas están
+  desactualizados y no estima. Hay que regenerarlo al menos una vez al mes.
+  Los datos son de TransMilenio S.A., GTFS bajo **CC BY-SA 4.0**; el índice es una
+  obra derivada y lo conserva en sus metadatos.
+- **Lo que no hay.** Historial de varios días (ranking de cancelaciones, «veedor»):
+  necesita almacenamiento persistente y Render Free no tiene disco ni base de datos.
+
+Las pantallas de horario (`Horario programado`, el detalle de ruta y el plan de
+viaje) siguen diciendo que su horario no es tiempo real: lo es solo lo que se
+rotula «En vivo · estimado».
 
 ## Cómo funciona el asistente
 

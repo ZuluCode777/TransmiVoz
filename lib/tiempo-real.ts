@@ -3,6 +3,7 @@ import { distanceMeters } from "@/lib/geo"
 import { FEED_DETENIDO_S, RETRASO_VIEJO_S, VEHICULO_VIEJO_S, type AlertaRt, type Alertas, type Lectura, type Posiciones, type Retrasos, type Vehiculo, type ViajeRt } from "@/lib/gtfs-rt"
 import type { IndiceGtfs, RutaIndice } from "@/lib/gtfs-indice"
 import { normalize } from "@/lib/text"
+import { textoDestino } from "@/lib/texto-tiempo-real"
 
 /**
  * Cálculos puros sobre los feeds en vivo y el índice estático: sin red, sin
@@ -115,12 +116,6 @@ function rutaPorId(indice: IndiceGtfs): Map<string, RutaIndice> {
   let mapa = porId.get(indice)
   if (!mapa) porId.set(indice, (mapa = new Map(indice.rutas.map((r) => [r.id, r]))))
   return mapa
-}
-
-/** Texto de la dirección de una ruta: «hacia X», o «entre X y Y» en las zonales que traen los dos extremos. */
-export function textoDestino(destino: string): string {
-  const [a, b] = destino.split("||").map((x) => x.trim())
-  return b ? `entre ${a} y ${b}` : `hacia ${a}`
 }
 
 // --- Retraso ------------------------------------------------------------------
@@ -512,3 +507,5 @@ export function canceladosHoy(i: Instantanea, rutas?: readonly string[]): Cancel
     .sort((a, b) => b.cancelados - a.cancelados)
   return { total, viajesDelDia: delDia, porRuta }
 }
+
+export { textoDestino }

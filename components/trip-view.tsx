@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react"
 import { ArrowRight, Route as RouteIcon } from "lucide-react"
+import { LlegadasEnVivo } from "@/components/en-vivo"
 import { ScreenHeader } from "@/components/screen-header"
 import { TransitMap, type MapLine, type MapMarker } from "@/components/transit-map"
 import type { TripLegSummary } from "@/lib/local-agent"
@@ -127,10 +128,16 @@ export function TripView({ legs, data, onOpenRoute, onBack }: TripViewProps) {
       </ol>
 
       {prescriptible && (
-        <p className="mt-4 rounded-2xl border-3 border-border bg-card p-4 text-base text-muted-foreground" role="note">
-          Plan armado con paradas verificadas. No tengo los horarios en tiempo real; confirma que el servicio esté
-          operando antes de salir.
-        </p>
+        <>
+          {/* Solo con el plan verificado: las llegadas son del tramo y la parada donde se sube. */}
+          {legs.map((leg, i) => (
+            <LlegadasEnVivo key={`${leg.routeCode}-${leg.board}-${i}`} parada={leg.board} ruta={leg.routeCode} />
+          ))}
+          <p className="mt-4 rounded-2xl border-3 border-border bg-card p-4 text-base text-muted-foreground" role="note">
+            Plan armado con paradas verificadas y el horario programado, que no es tiempo real. Las llegadas de arriba
+            son estimadas con la posición de los buses; confirma que el servicio esté operando antes de salir.
+          </p>
+        </>
       )}
 
       <p className="mt-4 text-base text-muted-foreground" role="note">
