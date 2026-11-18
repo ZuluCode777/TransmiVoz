@@ -86,7 +86,7 @@ function coincidencias(a: string, b: string): number {
  * coincidencia clara devuelve vacío: ninguna adivinanza.
  */
 export function rutasGtfsDeRuta(ruta: BusRoute, data: TransmilenioData, indice: IndiceGtfs): RutaIndice[] {
-  const exactas = indice.rutas.filter((r) => r.codigo === ruta.code.replace(/\s+/g, ""))
+  const exactas = indice.rutas.filter((r) => r.codigo === ruta.code)
   if (exactas.length > 0) return exactas
   const numerada = /^(\d+)\s?[A-Z]$/.exec(ruta.code)
   if (!numerada) return []

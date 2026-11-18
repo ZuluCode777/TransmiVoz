@@ -71,8 +71,8 @@ function horarioDeRespaldo(codigo: string | undefined, data: TransmilenioData): 
 }
 
 /** Una llegada hablada: «en unos 4 minutos» y, si el retraso reportado es notable, «con unos 3 minutos de retraso reportado». */
-function llegadaHablada(l: Llegada): string {
-  return `${enTiempo(l.segundos)}${textoRetraso(l.retraso)}`
+function llegadaHablada(l: Llegada, estimado = false): string {
+  return `${enTiempo(l.segundos)}${estimado ? ", estimado" : ""}${textoRetraso(l.retraso)}`
 }
 
 /** Agrupa por ruta y sentido, en el orden de la primera llegada de cada grupo. */
@@ -83,26 +83,26 @@ function porRutaYSentido(llegadas: Llegada[]): Llegada[][] {
 }
 
 /** «La B10 hacia Portal Norte», «la 8 hacia Guatoque». */
-const nombreServicio = (l: Llegada) => `la ${l.codigo} ${textoDestino(l.destino)}`
+const nombreServicio = (l: Llegada, etiqueta?: string) => `la ${etiqueta ?? l.codigo} ${textoDestino(l.destino)}`
 
 /** Frase de un grupo: la primera llegada en vivo y la siguiente; las programadas, aparte y rotuladas. */
-function frasesDeGrupo(grupo: Llegada[], parada: string): string {
+function frasesDeGrupo(grupo: Llegada[], parada: string, etiqueta?: string): string {
   const vivas = grupo.filter((l) => l.origen === "en-vivo")
   const programadas = grupo.filter((l) => l.origen === "programado")
   const partes: string[] = []
   if (vivas.length > 0) {
-    partes.push(`${nombreServicio(vivas[0])} llega a ${parada} ${llegadaHablada(vivas[0])}, estimado${vivas[1] ? `; el siguiente, ${enTiempo(vivas[1].segundos)}` : ""}`)
+    partes.push(`${nombreServicio(vivas[0], etiqueta)} llega a ${parada} ${llegadaHablada(vivas[0], true)}${vivas[1] ? `; el siguiente, ${enTiempo(vivas[1].segundos)}` : ""}`)
   }
   if (programadas.length > 0) {
     const [primera] = programadas
-    partes.push(vivas.length > 0 ? `según la programación, otro ${llegadaHablada(primera)}` : `${nombreServicio(primera)}: la próxima salida programada llegaría ${llegadaHablada(primera)}, sin bus en vivo confirmado`)
+    partes.push(vivas.length > 0 ? `según la programación, otro ${llegadaHablada(primera, true)}` : `${nombreServicio(primera, etiqueta)}: la próxima salida programada llegaría ${llegadaHablada(primera, true)}, sin bus en vivo confirmado`)
   }
   return partes.join("; ")
 }
 
-function textoLlegadas(llegadas: Llegada[], parada: string, conRuta: boolean): string {
+function textoLlegadas(llegadas: Llegada[], parada: string, etiquetaRuta?: string): string {
   const grupos = porRutaYSentido(llegadas)
-  if (conRuta) return `${grupos.map((g) => mayuscula(frasesDeGrupo(g, parada))).join(". ")}.`
+  if (etiquetaRuta) return `${grupos.map((g) => mayuscula(frasesDeGrupo(g, parada, etiquetaRuta))).join(". ")}.`
   const mostrados = grupos.slice(0, 3).map((g) => frasesDeGrupo(g, parada))
   const resto = grupos.length - mostrados.length
   return `En ${parada}, tiempos estimados: ${mostrados.join("; ")}${resto > 0 ? `; y ${plural(resto, "servicio más", "servicios más")}` : ""}.`
@@ -176,7 +176,7 @@ async function resolver(consulta: ConsultaTiempoReal, ctx: Contexto, context: Ag
       if (r.llegadas.length === 0) {
         return { reply: `No veo buses de la ${consulta.ruta} que lleguen a ${r.parada} en este momento.${salidasHoyFrase(ctx, consulta.ruta)}${cierre(r.meta)}`, steps: paso }
       }
-      return { reply: `${textoLlegadas(r.llegadas, r.parada, true)} Son tiempos estimados y pueden variar.${cierre(r.meta, { retrasos: true })}`, steps: paso }
+      return { reply: `${textoLlegadas(r.llegadas, r.parada, consulta.ruta)} Son tiempos estimados y pueden variar.${cierre(r.meta, { retrasos: true })}`, steps: paso }
     }
 
     case "buses": {
@@ -215,7 +215,7 @@ async function resolver(consulta: ConsultaTiempoReal, ctx: Contexto, context: Ag
       if (r.paradas.length === 0) return { reply: `No encuentro paradas a menos de 800 metros de tu ubicación estimada.${cierre(meta)}`, steps: paso }
       const partes = r.paradas.map((p) => {
         const grupos = porRutaYSentido(p.llegadas ?? []).slice(0, 2)
-        const llegadas = grupos.length ? `: ${grupos.map((g) => `${nombreServicio(g[0])} ${llegadaHablada(g[0])}`).join("; ")}` : ", sin llegadas que pueda estimar ahora"
+        const llegadas = grupos.length ? `: ${grupos.map((g) => `${nombreServicio(g[0])} ${llegadaHablada(g[0], true)}`).join("; ")}` : ", sin llegadas que pueda estimar ahora"
         return `${p.nombre}, a ${spokenDistance(p.distancia)}${llegadas}`
       })
       return { reply: `Cerca de tu ubicación estimada: ${partes.join(". ")}. Son tiempos estimados.${cierre(r.meta)}`, steps: paso }
@@ -267,7 +267,10 @@ async function resolver(consulta: ConsultaTiempoReal, ctx: Contexto, context: Ag
       if (consulta.ruta) {
         return { reply: `Hoy hay ${plural(c.total, "viaje cancelado", "viajes cancelados")} de la ${consulta.ruta}, de ${c.viajesDelDia.toLocaleString("es-CO")} programados.`, steps: paso }
       }
-      const peores = c.porRuta.slice(0, 3).map((r) => `${r.codigo} con ${r.cancelados}`)
+      // Un mismo código tiene varios `route_id` (ida, vuelta, variantes): se suman.
+      const porCodigo = new Map<string, number>()
+      for (const r of c.porRuta) porCodigo.set(r.codigo, (porCodigo.get(r.codigo) ?? 0) + r.cancelados)
+      const peores = [...porCodigo].sort((a, b) => b[1] - a[1]).slice(0, 3).map(([codigo, n]) => `${codigo} con ${n}`)
       return { reply: `Hoy hay ${plural(c.total, "viaje cancelado", "viajes cancelados")} de ${c.viajesDelDia.toLocaleString("es-CO")} programados.${peores.length ? ` Las rutas con más: ${lista(peores)}.` : ""}`, steps: paso }
     }
 

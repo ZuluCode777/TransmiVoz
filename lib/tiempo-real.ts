@@ -1,6 +1,6 @@
-import { diaSemanaDeFecha, fechaCivilEnZona, instanteLocal } from "@/lib/evidencia"
+import { diaSemanaDeFecha, fechaCivilEnZona } from "@/lib/evidencia"
 import { distanceMeters } from "@/lib/geo"
-import { FEED_DETENIDO_S, RETRASO_VIEJO_S, VEHICULO_VIEJO_S, type AlertaRt, type Alertas, type Lectura, type Posiciones, type Retrasos, type Vehiculo, type ViajeRt } from "@/lib/gtfs-rt"
+import { epocaBogota, FEED_DETENIDO_S, RETRASO_VIEJO_S, VEHICULO_VIEJO_S, type AlertaRt, type Alertas, type Lectura, type Posiciones, type Retrasos, type Vehiculo, type ViajeRt } from "@/lib/gtfs-rt"
 import type { IndiceGtfs, RutaIndice } from "@/lib/gtfs-indice"
 import { normalize } from "@/lib/text"
 import { textoDestino } from "@/lib/texto-tiempo-real"
@@ -489,13 +489,14 @@ export type CanceladosHoy = { total: number; viajesDelDia: number; porRuta: { ru
 /** Viajes cancelados hoy según `tripupdates.pb`, en total y por ruta (sin guardar nada). `null` si aún no hay copia. */
 export function canceladosHoy(i: Instantanea, rutas?: readonly string[]): CanceladosHoy | null {
   if (!i.retrasos) return null
-  const hoy = fechaCivilEnZona(new Date(i.ahora))
+  // Límites del día de Bogotá en segundos de época (sin `Intl` por viaje: son 84.000).
+  const inicioDia = epocaBogota(fechaCivilEnZona(new Date(i.ahora)).replaceAll("-", ""), "00:00:00")!
   const filtro = rutas ? new Set(rutas) : null
   const cuenta = new Map<string, number>()
   let total = 0
   let delDia = 0
   for (const v of i.retrasos.datos.porViaje.values()) {
-    if (instanteLocal(new Date(v.inicio * 1000)).fecha !== hoy) continue
+    if (v.inicio < inicioDia || v.inicio >= inicioDia + 86_400) continue
     if (filtro && !filtro.has(v.rutaId)) continue
     delDia++
     if (v.rel !== "CANCELED") continue

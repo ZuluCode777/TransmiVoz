@@ -75,7 +75,10 @@ test("estimación: la edad del reporte se descuenta", () => {
 })
 
 test("frescura: un bus con reporte de más de 300 s no cuenta", () => {
-  assert.deepEqual(llegadasEnParada(conBus({ km: 0.5, hace: 301 }), { paradas: new Set(["B"]) }), [])
+  // A la parada C aún le faltan 570 s: aun descontando la edad llegaría; solo la regla de los 300 s lo descarta.
+  assert.deepEqual(llegadasEnParada(conBus({ km: 0.1, hace: 301 }), { paradas: new Set(["C"]) }), [])
+  assert.equal(llegadasEnParada(conBus({ km: 0.1, hace: 300 }), { paradas: new Set(["C"]) }).length, 1)
+  assert.equal(busesVigentes(conBus({ km: 0.5, hace: 301 })).length, 0)
   assert.equal(busesVigentes(conBus({ km: 0.5, hace: 300 })).length, 1)
 })
 
@@ -267,3 +270,20 @@ test("el índice commiteado cumple el esquema y trae la atribución CC BY-SA 4.0
 })
 
 void CABECERA_MUESTRA
+
+test("cancelados de hoy: 100.000 viajes se cuentan sin pasar de medio segundo (en vivo eran 84.000)", () => {
+  const i = conBus({ km: 0.5 })
+  const inicioDia = Date.parse("2027-01-10T00:00:00-05:00") / 1000
+  const porViaje = new Map<string, ViajeRt>()
+  for (let n = 0; n < 100_000; n++) {
+    // Los pares son de hoy y los impares de ayer; uno de cada diez (siempre par), cancelado.
+    porViaje.set(`V${n}`, viaje({ tripId: `V${n}`, inicio: inicioDia + (n % 2 === 0 ? 3600 : -3600) + (n % 3600), rel: n % 10 === 0 ? "CANCELED" : "SCHEDULED" }))
+  }
+  i.ahora = Date.parse("2027-01-10T12:00:00-05:00")
+  i.retrasos = { datos: { cabecera: i.ahora / 1000, porViaje, porVehiculo: new Map(), total: porViaje.size }, leidoEn: i.ahora, obsoleto: false }
+  const t0 = performance.now()
+  const c = canceladosHoy(i)!
+  assert.ok(performance.now() - t0 < 500, `tardó ${Math.round(performance.now() - t0)} ms`)
+  assert.equal(c.viajesDelDia, 50_000)
+  assert.equal(c.total, 10_000)
+})
