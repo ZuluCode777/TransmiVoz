@@ -14,7 +14,7 @@ const respuesta = (intent: Intent): RespuestaAgente => runIntent(intent, { data 
 const observar = (intent: Intent, esperado: Esperado = { intent: intent.type }) => observarRespuesta(respuesta(intent), esperado, data)
 
 test("observarRespuesta: texto fijo, por igualdad con lo que da runIntent", () => {
-  for (const intent of [{ type: "greeting" }, { type: "help" }, { type: "cancel" }, { type: "unknown" }, { type: "unsupported", topic: "tarifas" }, { type: "unsupported", topic: "tiempo_real" }] as Intent[]) {
+  for (const intent of [{ type: "greeting" }, { type: "help" }, { type: "cancel" }, { type: "unknown" }, { type: "unsupported", topic: "tarifas" }, { type: "tiempo_real", consulta: { tema: "llegadas" } }] as Intent[]) {
     assert.deepEqual(observar(intent), intent)
   }
 })

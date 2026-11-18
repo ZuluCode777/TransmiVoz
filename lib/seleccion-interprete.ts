@@ -95,6 +95,8 @@ export function elegirIntent(intentDeReglas: Intent, intentDelModelo: Intent | n
 export function intencionUsaUbicacion(intent: Intent): boolean {
   if (intent.type === "gps") return true
   if (intent.type === "trip") return intent.origin === undefined
+  // Buses y paradas cerca de la persona: necesitan su ubicación.
+  if (intent.type === "tiempo_real") return intent.consulta.tema === "paradas_cercanas" || intent.consulta.tema === "buses_cercanos"
   return false
 }
 

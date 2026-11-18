@@ -14,7 +14,7 @@ const data = catalogoCongelado()
  * `version` en el archivo, actualiza esta constante y vuelve a correr la
  * evaluación; los resultados anteriores ya no son comparables.
  */
-const HUELLA_CORPUS = "f4cf24fcf011f6e6f5f5e2f37e2ccefd978c3a81419c18cc86c1fe22aaa3cec2"
+const HUELLA_CORPUS = "faf65ccf490cf3f77d497e9697a608138e42536a83a384380ed3939a79f29736"
 
 // ── Corpus ──
 
@@ -83,7 +83,7 @@ test("puntuar: viaje acertado, con origen y destino invertidos, con origen inven
 test("puntuar: la intención correcta con otra entidad no cuenta", () => {
   const p = puntuar({ intent: "schedule", routeCode: "B23" }, { type: "schedule", routeCode: "H54" }, data)
   assert.deepEqual([p.intentOk, p.entidadesOk, p.ok], [true, false, false])
-  assert.equal(puntuar({ intent: "unsupported", topic: "tarifas" }, { type: "unsupported", topic: "tiempo_real" }, data).ok, false)
+  assert.equal(puntuar({ intent: "unsupported", topic: "tarifas" }, { type: "tiempo_real", consulta: { tema: "llegadas" } }, data).ok, false)
   assert.equal(puntuar({ intent: "unknown" }, { type: "trip", destination: "Portal Norte" }, data).ok, false)
 })
 

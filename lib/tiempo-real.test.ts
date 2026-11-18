@@ -21,7 +21,7 @@ import {
 } from "@/lib/tiempo-real"
 import { CABECERA_MUESTRA, instantaneaDeMuestra } from "@/lib/fixtures-gtfs/cargar"
 import snapshot from "@/data/transmilenio.json" with { type: "json" }
-import indiceReal from "@/data/gtfs-indice.json" with { type: "json" }
+import indiceJson from "@/data/gtfs-indice.json" with { type: "json" }
 import { TransmilenioDataSchema } from "@/lib/transmilenio"
 
 /**
@@ -190,11 +190,11 @@ test("búsqueda de paradas sin tildes ni mayúsculas", () => {
 })
 
 test("paradas cercanas: agrupa por estación y ordena por distancia", () => {
-  const cerca = paradasCercanas(indiceReal as IndiceGtfs, { lat: 4.6786, lng: -74.0576 }, { radioM: 500, max: 30 })
+  const cerca = paradasCercanas(indiceReal, { lat: 4.6786, lng: -74.0576 }, { radioM: 500, max: 30 })
   assert.deepEqual(cerca.map((p) => p.distancia), cerca.map((p) => p.distancia).sort((a, b) => a - b))
   // La estación aparece una sola vez (no sus andenes) y con su nombre.
   assert.equal(cerca.filter((p) => p.nombre === "Virrey - Cendiatra").length, 1)
-  assert.deepEqual(paradasCercanas(indiceReal as IndiceGtfs, { lat: 0, lng: 0 }), [])
+  assert.deepEqual(paradasCercanas(indiceReal, { lat: 0, lng: 0 }), [])
 })
 
 test("calendario: el festivo corre el servicio de domingo y la salida por hora cuenta", () => {
@@ -219,10 +219,11 @@ test("dirección hablada: «hacia X» o «entre X y Y»", () => {
 
 // --- Mapeo de ids del catálogo a ids del GTFS -------------------------------------------------
 
+const indiceReal = IndiceGtfsSchema.parse(indiceJson)
 const catalogo = TransmilenioDataSchema.parse(snapshot)
 const idsDe = (codigo: string) => {
   const ruta = catalogo.routes.find((r) => r.code === codigo)!
-  return rutasGtfsDeRuta(ruta, catalogo, indiceReal as IndiceGtfs).map((r) => r.id)
+  return rutasGtfsDeRuta(ruta, catalogo, indiceReal).map((r) => r.id)
 }
 
 test("ids: el código del catálogo se vuelve el route_id del GTFS", () => {
@@ -257,7 +258,7 @@ test("el índice caduca como la evidencia: más de 31 días desde su publicació
 })
 
 test("el índice commiteado cumple el esquema y trae la atribución CC BY-SA 4.0", () => {
-  const indice = IndiceGtfsSchema.parse(indiceReal)
+  const indice = indiceReal
   assert.match(indice.licencia, /CC BY-SA 4\.0/)
   assert.match(indice.atribucion, /TransMilenio S\.A\./)
   assert.match(indice.sha256, /^[0-9a-f]{64}$/)

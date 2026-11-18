@@ -16,6 +16,9 @@ export async function register() {
       )
     }
   }
+  // Deja lista la copia de retrasos (8,8 MB) para que ninguna pregunta la espere.
+  const { precalentarRetrasos } = await import("@/lib/instantanea-servidor")
+  precalentarRetrasos()
   if (!process.env.OLLAMA_MODEL) return
   const { warmUpOllama } = await import("@/lib/ollama")
   void warmUpOllama()

@@ -4,6 +4,8 @@ import { LIMITE_ASISTENTE, VENTANA_ASISTENTE_MS } from "@/lib/cuota-asistente"
 import { leerCuerpoLimitado } from "@/lib/cuerpo-peticion"
 import { claveCliente } from "@/lib/identidad-cliente"
 import { parseIntent, plainReply, runIntent, type AgentContext, type Intent } from "@/lib/local-agent"
+import { precalentarFeeds } from "@/lib/instantanea-servidor"
+import { necesidadesDeConsulta, responderTiempoReal } from "@/lib/respuesta-tiempo-real"
 import { OLLAMA_MODEL, modeloListo, ollamaConfigured, ollamaStatus, parseIntentWithOllama, warmUpOllama } from "@/lib/ollama"
 import { createRateLimiter } from "@/lib/rate-limit"
 import { conOrigenPendiente, elegirIntent, requiereModelo } from "@/lib/seleccion-interprete"
@@ -134,6 +136,11 @@ export async function POST(req: Request) {
   // aparte, sin esperarla (hay una sola a la vez). Siempre una sola acción
   // validada por pregunta.
   const intentDeReglas = parseIntent(message, data)
+  // Una pregunta en vivo lee los feeds EN PARALELO con el modelo (la web espera 6 s en total): sin esto,
+  // 4,5 s del modelo + 3,5 s del feed no cabrían. Si las reglas no entendieron y el modelo va a
+  // interpretar, también se adelantan las posiciones (una lectura por 15 s, compartida).
+  if (intentDeReglas.type === "tiempo_real") precalentarFeeds(necesidadesDeConsulta(intentDeReglas.consulta))
+  else if (intentDeReglas.type === "unknown" && ollamaConfigured() && modeloListo()) precalentarFeeds({ posiciones: true, alertas: false, retrasos: true })
   let intentDelModelo: Intent | null = null
   if (ollamaConfigured()) {
     if (!modeloListo()) {
@@ -159,5 +166,6 @@ export async function POST(req: Request) {
   // una lectura que era fresca al llegar pero envejeció durante las esperas ya
   // no se usa (EA-07, #33).
   const context: AgentContext = { position: lectura, now: new Date() }
+  if (intent.type === "tiempo_real") return Response.json(await responderTiempoReal(intent.consulta, { data, context, engine }))
   return Response.json(runIntent(intent, { data, context, engine }))
 }

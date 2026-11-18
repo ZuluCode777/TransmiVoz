@@ -1,6 +1,6 @@
 import { diaSemanaDeFecha, fechaCivilEnZona, instanteLocal } from "@/lib/evidencia"
 import { distanceMeters } from "@/lib/geo"
-import { FEED_DETENIDO_S, RETRASO_VIEJO_S, VEHICULO_VIEJO_S, type AlertaRt, type Alertas, type Lectura, type Posiciones, type Retrasos, type Vehiculo } from "@/lib/gtfs-rt"
+import { FEED_DETENIDO_S, RETRASO_VIEJO_S, VEHICULO_VIEJO_S, type AlertaRt, type Alertas, type Lectura, type Posiciones, type Retrasos, type Vehiculo, type ViajeRt } from "@/lib/gtfs-rt"
 import type { IndiceGtfs, RutaIndice } from "@/lib/gtfs-indice"
 import { normalize } from "@/lib/text"
 
@@ -143,6 +143,22 @@ export function retrasoDeBus(retrasos: Retrasos | undefined, bus: Vehiculo, ahor
 /** ¿El viaje del bus está cancelado según `tripupdates.pb`? Solo se sabe cuando el `trip_id` coincide. */
 const viajeCancelado = (retrasos: Retrasos | undefined, bus: Vehiculo) => retrasos?.porViaje.get(bus.tripId)?.rel === "CANCELED"
 
+const viajesPorRuta = new WeakMap<Retrasos, Map<string, ViajeRt[]>>()
+/** Viajes de `tripupdates` de una ruta (se indexan la primera vez que se piden). */
+function viajesDeRuta(retrasos: Retrasos, rutaId: string): ViajeRt[] {
+  let mapa = viajesPorRuta.get(retrasos)
+  if (!mapa) {
+    mapa = new Map()
+    for (const v of retrasos.porViaje.values()) {
+      const lista = mapa.get(v.rutaId)
+      if (lista) lista.push(v)
+      else mapa.set(v.rutaId, [v])
+    }
+    viajesPorRuta.set(retrasos, mapa)
+  }
+  return mapa.get(rutaId) ?? []
+}
+
 // --- Llegadas a una parada -----------------------------------------------------
 
 export type Llegada = {
@@ -172,6 +188,12 @@ export type OpcionesLlegadas = {
   /** Si se da, solo estas rutas (`route_id`). */
   rutas?: readonly string[]
   max?: number
+}
+
+/** Rutas (patrones) que pasan por una parada o estación; si se dan `rutas`, solo entre ellas. */
+export function rutasPorParada(indice: IndiceGtfs, paradas: ReadonlySet<string>, rutas?: readonly string[]): RutaIndice[] {
+  const candidatas = rutas ? rutas.flatMap((id) => rutaDeIndice(indice, id) ?? []) : indice.rutas
+  return candidatas.filter((r) => patronDe(indice, r).some((p) => coincide(indice, p.id, paradas)))
 }
 
 /** Nombre para decir en voz alta: el de la estación madre si la hay (los andenes se llaman «Calle 85 B - 4 ó 6»). */
@@ -221,8 +243,8 @@ export function llegadasEnParada(i: Instantanea, { paradas, rutas, max = 6 }: Op
     salida.push(...enVivo)
     if (!retrasos) continue
     const idsEnVivo = new Set(buses.filter((b) => b.rutaId === ruta.id).map((b) => b.id))
-    for (const viaje of retrasos.porViaje.values()) {
-      if (viaje.rutaId !== ruta.id || viaje.rel === "CANCELED" || viaje.inicio <= ahora) continue
+    for (const viaje of viajesDeRuta(retrasos, ruta.id)) {
+      if (viaje.rel === "CANCELED" || viaje.inicio <= ahora) continue
       const llegada = viaje.inicio + parada.off + (viaje.retraso ?? 0) - ahora
       if (llegada < 0 || llegada > HORIZONTE_PROGRAMADO_S) continue
       if (viaje.vehiculoId && idsEnVivo.has(viaje.vehiculoId) && enVivo.some((v) => Math.abs(v.segundos - llegada) < 300)) continue
@@ -351,7 +373,9 @@ export function buscarParadas(indice: IndiceGtfs, consulta: string, max = 8): Pa
   for (const [id, [nombre, nodo, lat, lng]] of Object.entries(indice.paradas)) {
     if (nodo !== "" && nodo !== id) continue
     const n = normalize(nombre)
-    if (!palabras.every((w) => n.includes(w))) continue
+    // Cada palabra empieza una palabra del nombre («72» no está en «172»).
+    const nombrePalabras = n.split(" ")
+    if (!palabras.every((w) => nombrePalabras.some((p) => p.startsWith(w)))) continue
     encontradas.push({ p: { id, nombre, lat, lng }, rango: n === q ? 0 : n.startsWith(q) ? 1 : 2 })
   }
   return encontradas.sort((a, b) => a.rango - b.rango || a.p.nombre.length - b.p.nombre.length).slice(0, max).map((x) => x.p)

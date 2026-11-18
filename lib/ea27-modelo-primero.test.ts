@@ -93,10 +93,10 @@ test("elegirIntent: «cómo funciona» (modelo unknown) se queda con la ayuda de
   assert.deepEqual(elegirIntent(reglas, null), { intent: reglas, engine: "reglas" })
 })
 
-test("elegirIntent: «cuándo llega el bus» (reglas unknown) lo responde el modelo", () => {
-  const reglas = parseIntent("cuándo llega el bus", data)
+test("elegirIntent: «ya viene mi bus» (reglas unknown) lo responde el modelo", () => {
+  const reglas = parseIntent("ya viene mi bus", data)
   assert.equal(reglas.type, "unknown")
-  const delModelo: Intent = { type: "unsupported", topic: "tiempo_real" }
+  const delModelo: Intent = { type: "tiempo_real", consulta: { tema: "llegadas" } }
   assert.deepEqual(elegirIntent(reglas, delModelo), { intent: delModelo, engine: "ollama" })
 })
 
@@ -273,7 +273,7 @@ test("modelo listo: un unknown, una salida inválida o un estado HTTP de error n
   })
 })
 
-test("modelo listo: «cómo funciona» (modelo unknown) responde la ayuda de las reglas; «cuándo llega el bus» (reglas unknown) responde el modelo", async () => {
+test("modelo listo: «cómo funciona» (modelo unknown) responde la ayuda de las reglas; «ya viene mi bus» (reglas unknown) responde el modelo", async () => {
   await conRuta(ENTORNO, {}, async ({ preguntar, llamadas, fijarModelo, opciones }) => {
     await fijarModelo(true)
     opciones.contenido = modelo("unknown")
@@ -283,10 +283,11 @@ test("modelo listo: «cómo funciona» (modelo unknown) responde la ayuda de las
     assert.equal(ayuda.reply, runIntent({ type: "help" }, { data, engine: "reglas" }).reply)
 
     opciones.contenido = modelo("realtime")
-    const bus = await (await preguntar("cuándo llega el bus")).json()
+    const bus = await (await preguntar("ya viene mi bus")).json()
     assert.equal(consultas(llamadas), 2)
     assert.equal(bus.engine, "ollama")
-    assert.equal(bus.reply, runIntent({ type: "unsupported", topic: "tiempo_real" }, { data, engine: "ollama" }).reply)
+    // Es una pregunta en vivo sin ruta ni estación: pide la ruta, sin consultar los feeds.
+    assert.match(bus.reply, /¿de qué ruta/i)
   })
 })
 
@@ -320,7 +321,9 @@ test("modelo no cargado: no se consulta, responden las reglas y se lanza una pre
       assert.equal(consultas(llamadas), 0, frase)
       assert.equal(precargas(llamadas), 1, `${frase}: una precarga`)
       assert.equal(json.engine, "reglas", frase)
-      assert.equal(json.reply, runIntent(parseIntent(frase, data), { data, engine: "reglas" }).reply, frase)
+      // Una pregunta en vivo sin ruta ni estación pide el dato que falta, sin leer ningún feed.
+      if (parseIntent(frase, data).type === "tiempo_real") assert.match(json.reply, /¿De qué ruta/, frase)
+      else assert.equal(json.reply, runIntent(parseIntent(frase, data), { data, engine: "reglas" }).reply, frase)
       // Deja terminar la precarga fallida antes de la frase siguiente.
       await new Promise((resolver) => setImmediate(resolver))
     }

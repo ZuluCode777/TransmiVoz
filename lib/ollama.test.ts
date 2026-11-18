@@ -53,3 +53,30 @@ test(
     assert.equal(await parseIntentWithOllama("…", data), null)
   }),
 )
+
+test(
+  "realtime: el modelo aporta ruta y estación (validadas) y el tema sale de la frase",
+  withModelOutput(extraction({ intent: "realtime", routeCode: "b10", destination: "calle 100" }), async () => {
+    assert.deepEqual(await parseIntentWithOllama("¿cuándo pasa el B10 por la 100?", data), {
+      type: "tiempo_real",
+      consulta: { tema: "llegadas", ruta: "B10", parada: "Calle 100" },
+    })
+    // Una frase de novedades conserva su tema aunque el modelo la llame realtime.
+    assert.deepEqual(await parseIntentWithOllama("¿hay desvíos en el B10?", data), {
+      type: "tiempo_real",
+      consulta: { tema: "novedades", ruta: "B10", parada: "Calle 100" },
+    })
+    // «dónde viene el B10» es dónde está la ruta, no una llegada a una estación.
+    assert.deepEqual(await parseIntentWithOllama("dónde viene el B10", { ...data }), {
+      type: "tiempo_real",
+      consulta: { tema: "buses", ruta: "B10" },
+    })
+  }),
+)
+
+test(
+  "realtime: una ruta o estación inventada por el modelo no llega a la consulta",
+  withModelOutput(extraction({ intent: "realtime", routeCode: "Z999", destination: "Narnia" }), async () => {
+    assert.deepEqual(await parseIntentWithOllama("cuándo llega el bus", data), { type: "tiempo_real", consulta: { tema: "llegadas", ruta: undefined, parada: undefined } })
+  }),
+)

@@ -92,7 +92,7 @@ encendido y con la sesión iniciada durante la feria; no se estimó en pesos.
 
 ## Corpus
 
-`data/ea27-corpus.json`, versión 3, congelado el 12/11/2026, con **100 frases** en
+`data/ea27-corpus.json`, versión 4 (3 con el congelado del 12/11/2026; la 4 renombra el tema `unsupported/tiempo_real` a `tiempo_real` cuando el asistente empezó a responder en vivo), con **100 frases** en
 español de Bogotá («parce», «oiga», «la 26 a la 72», «el Tunal»), con
 referencia revisada contra el catálogo. Una prueba (`lib/ea27-evaluacion.test.ts`)
 comprueba que cada estación (por su nombre en el catálogo, sin pasar por el

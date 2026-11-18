@@ -313,10 +313,11 @@ export function crearFuentes(deps?: Dependencias) {
  * compartirían la caché (mismo motivo que el estado de `lib/ollama.ts`).
  */
 const almacen = globalThis as typeof globalThis & { __transmivozGtfsRt?: ReturnType<typeof crearFuentes> }
-export const fuentes = (almacen.__transmivozGtfsRt ??= crearFuentes())
+/** Las fuentes compartidas del servidor. Es una función para que las pruebas puedan poner las suyas en `globalThis`. */
+export const fuentes = (): ReturnType<typeof crearFuentes> => (almacen.__transmivozGtfsRt ??= crearFuentes())
 
 /** Salud de los tres feeds, para el diagnóstico y para decirle a la persona si el dato es confiable. */
-export function saludDeFeeds(origen: ReturnType<typeof crearFuentes> = fuentes): SaludFeed[] {
+export function saludDeFeeds(origen: ReturnType<typeof crearFuentes> = fuentes()): SaludFeed[] {
   return [origen.posiciones.salud(), origen.alertas.salud(), origen.retrasos.salud()]
 }
 

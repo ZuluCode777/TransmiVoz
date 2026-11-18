@@ -48,12 +48,32 @@ export type Intent =
   | { type: "schedule"; routeCode: string }
   | { type: "trip"; origin?: string; destination: string }
   | { type: "trip_missing_destination"; origin: string }
-  | { type: "unsupported"; topic: "tarifas" | "tiempo_real" }
+  | { type: "unsupported"; topic: "tarifas" }
+  /** Pregunta por datos EN VIVO (feeds GTFS Realtime de TransMilenio); la resuelve `lib/respuesta-tiempo-real.ts`. */
+  | { type: "tiempo_real"; consulta: ConsultaTiempoReal }
   /** Consulta informativa del Metro futuro (EA-13): nunca viaje, GPS ni abordaje. */
   | { type: "metro"; consulta: ConsultaMetro }
   /** Pregunta de permiso físico («¿ya puedo cruzar?»): solo explica el límite, sin acción. */
   | { type: "seguridad_fisica" }
   | { type: "unknown" }
+
+/**
+ * Qué pide una pregunta en vivo. `ruta` es el código tal como lo dijo la persona
+ * (del catálogo, como «8 G», o del GTFS, como «8-1»); `parada`, el nombre de una
+ * estación. El servidor los enlaza con los ids del GTFS y, si no puede, lo dice.
+ */
+export type ConsultaTiempoReal =
+  | { tema: "llegadas"; ruta?: string; parada?: string }
+  | { tema: "buses"; ruta: string }
+  | { tema: "bus"; bus: string }
+  | { tema: "paradas_cercanas" }
+  | { tema: "buses_cercanos" }
+  | { tema: "novedades"; ruta?: string; parada?: string }
+  | { tema: "buscar_parada"; texto: string }
+  | { tema: "sistema" }
+  | { tema: "salidas_hoy"; ruta: string }
+  | { tema: "cancelados"; ruta?: string }
+  | { tema: "estado_datos" }
 
 const AgentStepSchema = z.object({
   label: z.string(),
@@ -185,7 +205,24 @@ const hasPhrase = (text: string, phrases: string[]) => phrases.some((p) => ` ${t
 const CANCEL = ["cancela", "cancelar", "olvidalo", "detente", "no gracias", "dejalo"]
 const HELP = ["ayuda", "que puedes hacer", "como funciona", "que sabes hacer", "que haces"]
 const FARE = ["tarifa", "tarifas", "pasaje", "cuanto cuesta", "cuanto vale", "precio", "recarga", "recargar"]
-const REALTIME = ["cuanto se demora", "cuanto falta", "tiempo real", "a que hora llega", "donde viene"]
+/** Preguntas por cuándo llega un bus. */
+const LLEGADAS = [
+  "cuando pasa", "cuando pasan", "cuando llega", "cuando llegan", "cuando viene", "cuando vienen",
+  "cuanto se demora", "cuanto demora", "cuanto tarda", "cuanto falta", "a que hora llega", "a que hora llegan",
+  "tiempo real", "en vivo", "proximo bus", "proximos buses", "siguiente bus", "siguientes buses", "donde viene", "donde vienen",
+]
+/** Dónde están los buses de una ruta (necesitan la ruta). */
+const BUSES_RUTA = ["donde viene", "donde vienen", "donde esta", "donde estan", "en via", "en circulacion", "cuantos buses", "cuantos hay", "cuantos vienen", "cuantos van", "hay buses", "hay bus", "buses hay", "como van", "como viene"]
+const NOVEDADES = ["novedad", "novedades", "desvio", "desvios", "alerta", "alertas", "aviso", "avisos", "cierre", "cierres", "bloqueo", "bloqueos", "suspendida", "suspendido", "hay problemas", "hay algun problema"]
+const CANCELADOS = ["cancelado", "cancelados", "cancelada", "canceladas", "cancelaron", "viajes cancelados"]
+const SALIDAS = ["cuantos viajes", "cuantas salidas", "cuantos buses salen", "primera salida", "ultima salida", "primer bus", "ultimo bus", "a que hora sale el primero", "a que hora sale el ultimo", "salidas hoy", "viajes hoy"]
+const SISTEMA = ["buses en servicio", "buses circulando", "buses en circulacion", "estado del sistema", "estado del servicio", "como esta el servicio", "cuantos buses hay", "cuantos buses estan", "buses operando", "cuantos buses operan"]
+const ESTADO_DATOS = ["datos en vivo", "estado de los datos", "datos actualizados", "que tan actualizados", "fuente de datos", "funciona el tiempo real", "esta caido el tiempo real", "estan actualizados"]
+const PARADAS_CON_BUSES_CERCA = ["que buses pasan cerca", "buses pasan cerca", "buses pasan por aqui", "que bus pasa por aqui", "proximos buses cerca", "proximos buses por aqui", "paradas cercanas con buses", "que buses llegan cerca", "buses que pasan cerca", "buses llegan cerca"]
+const BUSES_CERCA = ["buses cerca", "bus cerca", "buses cercanos", "bus cercano", "buses alrededor", "donde hay buses"]
+/** Etiqueta de un bus: `Z32-7046`, `D0159`, `T10111`. */
+const ETIQUETA_BUS = /(?:^|[^a-z0-9])([a-z]{1,2}\d{2}-\d{3,5}|[a-z]\d{4,5})(?![a-z0-9])/i
+const RUTA_ESCRITA = /\b(?:ruta|bus|buses|servicio)\s+([a-z]{0,2}\d{1,3}[a-z]{0,2}(?:-\d{1,2}[a-z]?)?)(?![a-z0-9-])/i
 const SCHEDULE = ["horario", "horarios", "a que hora", "hora", "abre", "cierra", "opera", "funciona"]
 const FREQUENT = ["frecuente", "frecuentes", "de siempre", "favorita", "favoritas", "guardadas"]
 const GPS = ["gps", "ubicacion", "donde estoy", "cerca", "cercana", "cercanas", "caminar", "caminando", "a pie"]
@@ -260,6 +297,71 @@ function roleOf(before: string): Role {
   return "none"
 }
 
+/**
+ * Código de ruta de una frase: el del catálogo («B10», «8 G») o, si no hay, el que
+ * sigue a «ruta», «bus» o «servicio» (los zonales: «ruta 166», «bus 8-1»). El del
+ * segundo tipo no se verifica aquí (el catálogo no tiene los zonales): lo enlaza el
+ * servidor con el GTFS.
+ */
+function rutaDeFrase(text: string, data: TransmilenioData): string | undefined {
+  return findRouteByCode(text, data)?.code ?? RUTA_ESCRITA.exec(text)?.[1]?.toUpperCase()
+}
+
+/**
+ * Pregunta en vivo (cuándo llega, dónde viene, novedades, buses cerca…), o `null`
+ * si la frase no lo es. Misma lectura para las reglas y para el modelo, que solo
+ * aporta la ruta y la estación (`consultaTiempoRealDeModelo`).
+ */
+export function interpretarTiempoReal(text: string, data: TransmilenioData): ConsultaTiempoReal | null {
+  const t = normalize(text)
+  const etiqueta = ETIQUETA_BUS.exec(text)?.[1]
+  if (etiqueta) return { tema: "bus", bus: etiqueta.toUpperCase() }
+  const ruta = rutaDeFrase(text, data)
+  const parada = findPlaces(text, data)[0]?.name
+  if (hasPhrase(t, CANCELADOS)) return { tema: "cancelados", ruta }
+  if (hasPhrase(t, NOVEDADES)) return { tema: "novedades", ruta, parada }
+  if (hasPhrase(t, ESTADO_DATOS)) return { tema: "estado_datos" }
+  const busqueda = /(?:busca|buscar|encuentra|encontrar)\s+(?:la\s+|una\s+)?(?:parada|estacion)s?\s+(?:de\s+|llamada\s+)?(.+)$/.exec(t)
+  if (busqueda) return { tema: "buscar_parada", texto: busqueda[1] }
+  if (hasPhrase(t, PARADAS_CON_BUSES_CERCA)) return { tema: "paradas_cercanas" }
+  if (hasPhrase(t, BUSES_CERCA)) return { tema: "buses_cercanos" }
+  if (ruta) {
+    if (hasPhrase(t, SALIDAS)) return { tema: "salidas_hoy", ruta }
+    // «cuándo pasa el B10 por Calle 72» es una llegada aunque diga «viene»; sin estación, «dónde viene» es dónde está.
+    if (parada && hasPhrase(t, LLEGADAS)) return { tema: "llegadas", ruta, parada }
+    if (hasPhrase(t, BUSES_RUTA)) return { tema: "buses", ruta }
+    if (hasPhrase(t, LLEGADAS)) return { tema: "llegadas", ruta }
+    return null
+  }
+  if (hasPhrase(t, SISTEMA)) return { tema: "sistema" }
+  if (hasPhrase(t, LLEGADAS)) return { tema: "llegadas", parada }
+  return null
+}
+
+/**
+ * Pregunta en vivo según el modelo: su `realtime` solo trae la ruta y la estación
+ * (ya validadas contra el catálogo). El tema sale de la misma lectura de reglas;
+ * si la frase no encaja en ninguno, se pregunta por llegadas.
+ */
+export function consultaTiempoRealDeModelo(text: string, data: TransmilenioData, entidades: { ruta?: string; parada?: string }): ConsultaTiempoReal {
+  const base = interpretarTiempoReal(text, data) ?? { tema: "llegadas" as const }
+  const ruta = entidades.ruta ?? ("ruta" in base ? base.ruta : undefined)
+  const parada = entidades.parada ?? ("parada" in base ? base.parada : undefined)
+  switch (base.tema) {
+    case "llegadas":
+      return { tema: ruta && !parada && hasPhrase(normalize(text), BUSES_RUTA) ? "buses" : "llegadas", ruta, parada } as ConsultaTiempoReal
+    case "novedades":
+      return { tema: "novedades", ruta, parada }
+    case "cancelados":
+      return { tema: "cancelados", ruta }
+    case "buses":
+    case "salidas_hoy":
+      return ruta ? { tema: base.tema, ruta } : { tema: "llegadas", parada }
+    default:
+      return base
+  }
+}
+
 /** Interpreta una frase por reglas. */
 export function parseIntent(text: string, data: TransmilenioData): Intent {
   const t = normalize(text)
@@ -279,12 +381,11 @@ export function parseIntent(text: string, data: TransmilenioData): Intent {
   if (hasPhrase(t, HELP)) return { type: "help" }
   if (hasPhrase(t, FARE)) return { type: "unsupported", topic: "tarifas" }
 
+  const enVivo = interpretarTiempoReal(text, data)
+  if (enVivo) return { type: "tiempo_real", consulta: enVivo }
+
   const route = findRouteByCode(text, data)
-  if (route) {
-    if (hasPhrase(t, REALTIME)) return { type: "unsupported", topic: "tiempo_real" }
-    return hasPhrase(t, SCHEDULE) ? { type: "schedule", routeCode: route.code } : { type: "route_info", routeCode: route.code }
-  }
-  if (hasPhrase(t, REALTIME)) return { type: "unsupported", topic: "tiempo_real" }
+  if (route) return hasPhrase(t, SCHEDULE) ? { type: "schedule", routeCode: route.code } : { type: "route_info", routeCode: route.code }
 
   if (hasPhrase(t, FREQUENT)) return { type: "frequent" }
 
@@ -549,11 +650,12 @@ function resolverIntent(
       return say("Listo, cancelado.")
 
     case "unsupported":
-      return say(
-        intent.topic === "tarifas"
-          ? "Todavía no tengo información de tarifas. Puedo ayudarte con rutas, estaciones y horarios."
-          : "Todavía no tengo la ubicación de los buses en tiempo real. Puedo decirte el horario de la ruta y por dónde pasa.",
-      )
+      return say("Todavía no tengo información de tarifas. Puedo ayudarte con rutas, estaciones y horarios.")
+
+    case "tiempo_real":
+      // Las respuestas en vivo piden la red (`lib/respuesta-tiempo-real.ts`, desde la ruta del servidor).
+      // Esta resolución síncrona, sin red, es la de reglas sin conexión: lo dice y ofrece lo que sí tiene.
+      return say("No puedo consultar los datos en vivo de TransMilenio desde aquí ahora. Puedo decirte el horario publicado de la ruta y por dónde pasa.")
 
     case "metro": {
       // Solo informa (acción `none`): sin pantalla de viaje, GPS ni búsqueda de buses.
