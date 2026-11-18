@@ -33,26 +33,32 @@ import { frasesLlegada, haceTiempo, mayuscula, plural, predicadoLlegada, textoDe
 const ANUNCIO_MINIMO_MS = 60_000
 
 /**
- * Anuncia `texto` en una región viva, sin repetir y sin más de uno por `ANUNCIO_MINIMO_MS`. Un aviso
- * `urgente` (un error: lo anunciado antes ya no vale) no espera el minuto.
+ * Anuncia `texto` en una región viva, sin repetir y sin más de uno por `ANUNCIO_MINIMO_MS`. La ÚNICA excepción
+ * es un error (`esError`) que sustituye a lo que eran datos válidos: esos datos ya no valen y se avisa al
+ * instante. Los cambios entre errores (ambigüedad ↔ red…) que vengan después se espacian como todo lo demás.
  */
-export function useAnuncioEspaciado(texto: string, urgente = false): string {
+export function useAnuncioEspaciado(texto: string, esError = false): string {
   const [anuncio, setAnuncio] = useState("")
   const ultimo = useRef(0)
+  /** ¿Lo que está anunciado ahora es un error? */
+  const anunciadoEsError = useRef(false)
   useEffect(() => {
     // Sin texto (consulta nueva, error): se borra lo anunciado, para que no quede un dato viejo en la región viva.
     if (!texto) {
       if (anuncio) setAnuncio("")
+      anunciadoEsError.current = false
       return
     }
     if (texto === anuncio) return
+    const urgente = esError && !anunciadoEsError.current
     const espera = urgente ? 0 : Math.max(0, ultimo.current + ANUNCIO_MINIMO_MS - Date.now())
     const id = setTimeout(() => {
       ultimo.current = Date.now()
+      anunciadoEsError.current = esError
       setAnuncio(texto)
     }, espera)
     return () => clearTimeout(id)
-  }, [texto, anuncio, urgente])
+  }, [texto, anuncio, esError])
   return anuncio
 }
 

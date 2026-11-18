@@ -543,3 +543,72 @@ test("R3·2 el hook conserva el cuerpo del 409/404: código y opciones", async (
   assert.equal(fallaDe(h), null)
   h.desmontar()
 })
+
+// ── Revisión final ──
+
+test("RF·4 solo el primer error tras datos válidos se anuncia al instante; los cambios entre errores se espacian", () => {
+  mock.timers.enable({ apis: ["setTimeout", "Date"], now: 1_000_000 })
+  try {
+    const e = entorno(ok({ operacion: "llegadas", meta, parada: "Calle 100", ruta: "B10", motivo: null, llegadas: [llegada()] }))
+    const m = montar("LlegadasEnVivo", { parada: "Calle 100", ruta: "B10" }, e.dobles)
+    const viva = () => texto(nodos(m.arbol(), (n) => n.props["aria-live"] === "polite")[0])
+    const cambiar = (resultado: object) => {
+      e.estado.resultado = resultado
+      m.redibujar()
+    }
+    const ambigua = falla("ruta-ambigua", ["Z9 (zonal urbano)", "Z9 (zonal complementario)"])
+    mock.timers.tick(1)
+    assert.match(viva(), /llega a Calle 100/, "t=0: datos anunciados")
+
+    mock.timers.tick(10_000)
+    cambiar(ambigua) // t=10 s: datos válidos → error: AL INSTANTE
+    mock.timers.tick(1)
+    assert.match(viva(), /Hay más de un servicio/, "t=10 s: el primer error se dice ya")
+
+    mock.timers.tick(10_000)
+    cambiar(errorDeRed) // t=20 s: otro error distinto: se espacia
+    mock.timers.tick(1)
+    assert.match(viva(), /Hay más de un servicio/, "t=20 s: antes se anunciaba de inmediato")
+    mock.timers.tick(30_000)
+    cambiar(ambigua) // t=50 s: vuelve el primero: el pendiente (red) se reemplaza, nada nuevo antes del minuto
+    mock.timers.tick(1)
+    assert.match(viva(), /Hay más de un servicio/, "t=50 s: sigue lo anunciado")
+    cambiar(errorDeRed)
+    mock.timers.tick(19_000)
+    assert.match(viva(), /Hay más de un servicio/, "t≈69 s: aún no (el último anuncio fue a los 10 s)")
+    mock.timers.tick(2_000)
+    assert.match(viva(), /^No pude consultar los datos en vivo ahora/, "t≈71 s: pasado el minuto desde el último anuncio, se dice el cambio")
+    m.desmontar()
+  } finally {
+    mock.timers.reset()
+  }
+})
+
+test("RF·4 un error que sigue a datos válidos vuelve a ser inmediato (datos → error → datos → error)", () => {
+  mock.timers.enable({ apis: ["setTimeout", "Date"], now: 1_000_000 })
+  try {
+    const datos = ok({ operacion: "llegadas", meta, parada: "Calle 100", ruta: "B10", motivo: null, llegadas: [llegada()] })
+    const e = entorno(datos)
+    const m = montar("LlegadasEnVivo", { parada: "Calle 100", ruta: "B10" }, e.dobles)
+    const viva = () => texto(nodos(m.arbol(), (n) => n.props["aria-live"] === "polite")[0])
+    mock.timers.tick(1)
+    mock.timers.tick(5_000)
+    e.estado.resultado = errorDeRed
+    m.redibujar()
+    mock.timers.tick(1)
+    assert.match(viva(), /^No pude consultar/)
+    mock.timers.tick(61_000)
+    e.estado.resultado = datos // vuelven los datos: se anuncian pasado el minuto
+    m.redibujar()
+    mock.timers.tick(1)
+    assert.match(viva(), /llega a Calle 100/)
+    mock.timers.tick(5_000)
+    e.estado.resultado = errorDeRed
+    m.redibujar()
+    mock.timers.tick(1)
+    assert.match(viva(), /^No pude consultar/, "otra vez datos → error: inmediato")
+    m.desmontar()
+  } finally {
+    mock.timers.reset()
+  }
+})

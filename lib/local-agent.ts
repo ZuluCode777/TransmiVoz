@@ -226,16 +226,25 @@ const ETIQUETA_BUS = /(?:^|[^a-z0-9])([a-z]{1,2}\d{2}-\d{3,5}|[a-z]\d{4,5})(?![a
 const BUS_NUMERICO = /\b(?:bus|buses|vehiculo|articulado|biarticulado)\s+(?:numero\s+)?(\d{4,6})\b/
 /** Lo que sigue a «por», «en», «a», «hasta» o «para» al final de la frase: la parada o estación nombrada. */
 const PARADA_ESCRITA =
-  /(?:\b(?:por|en|a|hasta|para|sobre|acerca de|respecto a|alrededor de)|\b(?:novedad(?:es)?|desvios?|alertas?|avisos?|cierres?|bloqueos?|llegadas?)\s+(?:de|del))\s+(?:la\s+|el\s+)?(?:parada\s+|estacion\s+)?([a-z0-9][a-z0-9 ]*)$/
+  /(?:\b(?:por(?!\s+favor\b)|en|a|hasta|para|sobre|acerca de|respecto a|alrededor de)|\b(?:novedad(?:es)?|desvios?|alertas?|avisos?|cierres?|bloqueos?|llegadas?)\s+(?:de|del))\s+(?:la\s+|el\s+)?(?:parada\s+|estacion\s+)?([a-z0-9][a-z0-9 ]*)$/
 /** Palabras que preceden al nombre de una parada y son parte de él («Br. El Virrey»): lo que sigue a ellas no es una estación del catálogo. */
 const PREFIJO_DE_NOMBRE = /(?:^|\s)(?:br|pq|urb|cc|ed|centro|colegio|iglesia|hospital|universidad|ciudadela|barrio)(?:\s+(?:el|la|los|las|del|de))?$/
 /** Sistema que la persona pidió para un código: «la C25 zonal», «el B10 troncal», «la 7 zonal urbano». */
 const SISTEMA_DICHO = /\b(troncal|dual|alimentador(?:a)?|zonal(?: urbano| complementario| especial)?|urbano|complementario|especial|transmicable|cable)\b/
+/** El sistema pedido pegado al final de un código («C25 zonal»). */
+const SISTEMA_AL_FINAL = /\s+(?:troncal|dual|alimentadora?|zonal(?: urbano| complementario| especial)?|urbano|complementario|especial|transmicable|cable)$/i
+const SISTEMA_SOLO = /^(?:troncal|dual|alimentadora?|zonal(?: urbano| complementario| especial)?|urbano|complementario|especial|transmicable|cable)$/
 /** Identificador numérico de una ruta del GTFS (`route_id`): «la ruta 12756». */
 const RUTA_ID = /\b(?:ruta|servicio|route id|id de ruta)\s+(?:id\s+)?(\d{4,6})\b/
 /** Lo que suele cerrar una pregunta y no es parte del nombre: «por favor», «hoy», «ahora». */
 const CIERRE_DE_FRASE =
   /(?:\s+(?:por favor|porfa|gracias|hoy|ahora mismo|ahora|manana|otra vez|en este momento|en estos momentos|todavia|aun|ya|hacia el (?:norte|sur|oriente|occidente|centro)|esta (?:noche|tarde|manana)))+$/
+/** Lo que sigue a un tema («hay novedades Br. El Virrey») cuando no hay preposición que marque dónde empieza la parada. */
+const TRAS_TEMA = /\b(?:novedad(?:es)?|desvios?|alertas?|avisos?|cierres?|bloqueos?)\s+([a-z0-9][a-z0-9 ]*)$/
+/** Palabras que abren el nombre de una parada («Br.», «Pq.»…), con su artículo: si el modelo da solo lo que sigue, vino truncado. */
+const PREFIJO_AL_FINAL = /((?:br|pq|urb|cc|ed|centro|colegio|iglesia|hospital|universidad|ciudadela|barrio)(?:\s+(?:el|la|los|las|del|de))?)$/
+/** Calificador de ruta al final: «Virrey de la ruta B10», «Virrey del servicio 8-1»; no toca los «de/del» que son del nombre. */
+const CALIFICADOR_DE_RUTA = /\s+(?:de|del)\s+(?:la\s+|el\s+)?(?:ruta|servicio|linea|bus|buses)\s+[a-z0-9][a-z0-9 -]*$/
 const NO_ES_PARADA = /^(?:ruta|rutas|bus|buses|servicio|via|circulacion|la|el|mi|aqui|alli|ahi|casa|estacion|parada|bogota|el dia|este momento|ahora|hoy)\b/
 const RUTA_ESCRITA = /\b(?:ruta|bus|buses|servicio)\s+([a-z]{0,2}\d{1,3}[a-z]{0,2}(?:-\d{1,2}[a-z]?)?)(?![a-z0-9-])/i
 const SCHEDULE = ["horario", "horarios", "a que hora", "hora", "abre", "cierra", "opera", "funciona"]
@@ -340,9 +349,22 @@ export function conSistemaDicho(codigo: string, frase: string): string {
  * decide si existe. Nada si lo que sigue a la preposición es una ruta, un bus o una palabra suelta.
  */
 function paradaEscrita(t: string, ruta: string | undefined): string | undefined {
-  const dicha = PARADA_ESCRITA.exec(t)?.[1]?.trim().replace(CIERRE_DE_FRASE, "")
-  if (!dicha || NO_ES_PARADA.test(dicha)) return undefined
-  if (ruta && dicha.replace(/ /g, "") === normalize(ruta).replace(/ /g, "")) return undefined
+  const cruda = (PARADA_ESCRITA.exec(t) ?? TRAS_TEMA.exec(t))?.[1]?.trim()
+  if (!cruda) return undefined
+  // Fuera lo que no es el nombre: el cierre de la frase y el calificador de ruta («… de la ruta B10», «… del B10»).
+  const codigo = ruta?.replace(SISTEMA_AL_FINAL, "").replace(/ /g, "") ?? ""
+  const delCodigo = codigo ? new RegExp(`\\s+(?:de|del)\\s+(?:la\\s+|el\\s+)?${[...normalize(codigo).replace(/ /g, "")].join("\\s?")}$`) : null
+  let dicha = cruda
+  for (let n = 0; n < 3; n++) {
+    dicha = dicha.replace(CIERRE_DE_FRASE, "").replace(CALIFICADOR_DE_RUTA, "")
+    if (delCodigo) dicha = dicha.replace(delCodigo, "")
+  }
+  dicha = dicha.trim()
+  if (codigo && dicha.startsWith(`${normalize(codigo)} `)) dicha = dicha.slice(normalize(codigo).length + 1)
+  // Lo que queda es la ruta misma («B10», «C25 troncal») o solo su sistema: no es una parada.
+  const esLaRuta = (d: string) => !!ruta && [normalize(codigo), normalize(ruta).replace(/ /g, "")].includes(d.replace(/ /g, ""))
+  if (esLaRuta(cruda)) return undefined
+  if (!dicha || NO_ES_PARADA.test(dicha) || esLaRuta(dicha) || SISTEMA_SOLO.test(dicha)) return undefined
   return dicha
 }
 
@@ -413,7 +435,13 @@ export function consultaTiempoRealDeModelo(text: string, data: TransmilenioData,
   const ruta = ("ruta" in base ? base.ruta : undefined) ?? (entidades.ruta ? conSistemaDicho(entidades.ruta, text) : undefined)
   // Manda lo que la persona escribió; el modelo solo completa lo que dijo (si no aparece en la frase, es invento del modelo).
   const delTexto = new Set(normalize(text).split(" "))
-  const delModelo = entidades.parada && normalize(entidades.parada).split(" ").every((p) => delTexto.has(p)) ? nombreDeParadaDicho(entidades.parada, data, text) : undefined
+  // La entidad del modelo también llega con cierres pegados («Calle 100 hoy»): se limpian antes de compararla.
+  const modelo = entidades.parada ? normalize(entidades.parada).replace(CIERRE_DE_FRASE, "").trim() : ""
+  let delModelo = modelo && modelo.split(" ").every((p) => delTexto.has(p)) ? nombreDeParadaDicho(modelo, data, text) : undefined
+  // Truncada: en la frase el nombre sigue a «Br.», «Pq.»… y el modelo dio solo lo que sigue («Virrey» por «Br. El Virrey»).
+  const donde = delModelo ? normalize(text).indexOf(modelo) : -1
+  const abre = donde > 0 ? PREFIJO_AL_FINAL.exec(normalize(text).slice(0, donde).trim())?.[1] : undefined
+  if (delModelo && abre) delModelo = `${abre} ${modelo}`
   let parada = ("parada" in base ? base.parada : undefined) ?? delModelo
   // Si el modelo da el nombre más completo que lo que sacó la regla («Terminal» → «Terminal del Transporte Salitre»), vale el completo.
   if (parada && delModelo) {
@@ -423,7 +451,7 @@ export function consultaTiempoRealDeModelo(text: string, data: TransmilenioData,
   }
   // Lo dicho puede ser una abreviatura que solo el modelo completa («la 100» → «Calle 100»): se acepta si el
   // nombre del catálogo que da el modelo contiene TODAS las palabras dichas. «Br. El Virrey» no cabe en «Virrey».
-  const [delCatalogo] = entidades.parada ? findPlaces(entidades.parada, data) : []
+  const [delCatalogo] = modelo ? findPlaces(modelo, data) : []
   if (parada && delCatalogo && normalize(parada).split(" ").every((p) => normalize(delCatalogo.name).split(" ").includes(p))) parada = delCatalogo.name
   switch (base.tema) {
     case "llegadas":

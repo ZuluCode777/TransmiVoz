@@ -112,9 +112,10 @@ test(
 test(
   "R3·1 el modelo completa un nombre que la regla vio a medias (sin preposición ni «del»)",
   conModelo({ intent: "realtime", origin: "", destination: "Terminal Salitre", routeCode: "" }, async () => {
-    assert.deepEqual(await parseIntentWithOllama("hay novedades terminal salitre", data), {
+    // Las reglas, sin preposición, ven solo la estación «Terminal»; el modelo da el nombre entero que dijo la persona.
+    assert.deepEqual(await parseIntentWithOllama("cuándo llega el bus Terminal Salitre", data), {
       type: "tiempo_real",
-      consulta: { tema: "novedades", ruta: undefined, parada: "Terminal Salitre" },
+      consulta: { tema: "llegadas", ruta: undefined, parada: "terminal salitre" },
     })
   }),
 )
@@ -262,3 +263,71 @@ test("R3·2 la ambigüedad de parada también conserva sus opciones (endpoint y 
 })
 
 void mock
+
+// ── Revisión final ────────────────────────────────────────────────────────────
+
+import { necesidadesDe } from "@/lib/instantanea-servidor"
+
+test("RF·1 sin preposición, «hay novedades Br. El Virrey» conserva la parada completa y filtra por ella", async () => {
+  assert.equal(parada("hay novedades Br. El Virrey"), "br el virrey", "antes: sin parada, y las alertas de TODA la red")
+  assert.equal(parada("hay desvíos Pq. El Virrey"), "pq el virrey")
+  assert.equal(parada("hay novedades Terminal del Transporte Salitre"), "terminal del transporte salitre")
+  assert.equal(parada("hay novedades Calle 100"), "Calle 100")
+  // La parada resuelta es la de verdad (no la estación «Virrey» a 20 km), y el filtro existe: alertas de TODA la red no.
+  const r = resolverParada(parada("hay novedades Br. El Virrey")!, contextoReal())
+  assert.equal(r.tipo, "ok")
+  if (r.tipo === "ok") {
+    assert.equal(r.parada.nombre, "Br. El Virrey")
+    assert.ok(!r.parada.ids.has("2302"))
+  }
+  const entorno = instalarFeeds()
+  entorno.estado.alertasVigentes = true // toda alerta de la muestra está vigente: sin filtro saldrían todas
+  const filtrada = await responderTiempoReal(consulta("hay novedades Br. El Virrey")!, { data, context: { now: entorno.ahora() } })
+  assert.match(filtrada.reply, /^No hay novedades vigentes en la estación Br\. El Virrey/, "con el filtro de parada no hay ninguna: antes devolvía las de toda la red")
+})
+
+test(
+  "RF·1 el modelo da «Virrey» truncado: se rechaza y se conserva «Br. El Virrey», aunque las reglas no sacaran nombre",
+  conModelo({ intent: "realtime", origin: "", destination: "Virrey", routeCode: "" }, async () => {
+    for (const frase of ["cuándo llega un bus Br. El Virrey", "dime cuándo llega un bus Pq. El Virrey"]) {
+      const intent = await parseIntentWithOllama(frase, data)
+      assert.deepEqual(intent, { type: "tiempo_real", consulta: { tema: "llegadas", ruta: undefined, parada: frase.includes("Pq.") ? "pq el virrey" : "br el virrey" } }, frase)
+    }
+    assert.deepEqual(await parseIntentWithOllama("hay novedades por el Virrey", data), { type: "tiempo_real", consulta: { tema: "novedades", ruta: undefined, parada: "Virrey" } }, "sin prefijo, «Virrey» es correcto")
+  }),
+)
+
+test("RF·2 el calificador de ruta al final no es parte de la parada («Virrey de la ruta B10»)", async () => {
+  assert.deepEqual(consulta("¿Hay novedades en la estación Virrey de la ruta B10?"), { tema: "novedades", ruta: "B10", parada: "Virrey" })
+  assert.deepEqual(consulta("¿Hay novedades en Calle 100 del B10?"), { tema: "novedades", ruta: "B10", parada: "Calle 100" })
+  assert.deepEqual(consulta("¿Hay novedades en Calle 100 de la B10?"), { tema: "novedades", ruta: "B10", parada: "Calle 100" })
+  assert.deepEqual(consulta("¿Cuándo pasa la 8 G por Calle 72 de la ruta 8 G?"), { tema: "llegadas", ruta: "8 G", parada: "Calle 72" })
+  assert.deepEqual(consulta("¿Hay novedades en Calle 100 del servicio CB144?"), { tema: "novedades", ruta: "CB144", parada: "Calle 100" })
+  // Los «de/del» que son del nombre real no se tocan.
+  assert.equal(parada("¿Hay novedades en Plazuelas del Virrey?"), "plazuelas del virrey")
+  assert.equal(parada("¿Hay novedades en Centro de Convenciones de la ruta B10?"), "centro de convenciones")
+  assert.equal(parada("¿Hay novedades en Terminal del Transporte Salitre?"), "terminal del transporte salitre")
+  const entorno = instalarFeeds()
+  const r = await responderTiempoReal(consulta("¿Hay novedades en la estación Virrey de la ruta B10?")!, { data, context: { now: entorno.ahora() } })
+  assert.doesNotMatch(r.reply, /No encontré la parada/, "antes: «No encontré la parada virrey de la ruta b10»")
+  assert.match(r.reply, /en la B10 y la estación Virrey/)
+})
+
+test(
+  "RF·3 el destino del modelo con cierre pegado («Calle 100 hoy») no pisa el resultado limpio de las reglas",
+  conModelo({ intent: "realtime", origin: "", destination: "Calle 100 hoy", routeCode: "B10" }, async () => {
+    for (const cierre of ["hoy", "por favor", "hacia el norte", "ahora mismo", "esta tarde"]) {
+      const intent = await parseIntentWithOllama(`¿Cuándo pasa el B10 por Calle 100 ${cierre}?`, data)
+      assert.deepEqual(intent, { type: "tiempo_real", consulta: { tema: "llegadas", ruta: "B10", parada: "Calle 100" } }, cierre)
+    }
+  }),
+)
+
+test(
+  "RF·3 y cuando solo el modelo da la estación, también sale limpia",
+  conModelo({ intent: "realtime", origin: "", destination: "Calle 100 por favor", routeCode: "B10" }, async () => {
+    assert.deepEqual(await parseIntentWithOllama("B10 cuándo llega Calle 100 por favor", data), { type: "tiempo_real", consulta: { tema: "llegadas", ruta: "B10", parada: "Calle 100" } })
+  }),
+)
+
+void necesidadesDe
